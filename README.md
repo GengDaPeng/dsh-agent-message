@@ -1,5 +1,7 @@
 # dsh-agent-message
 
+[English](./README.en.md) | 中文
+
 > DeepSeek Harness 的**跨会话 Agent 通信**插件：让运行在同一个进程里的不同 Agent 会话，像发消息一样互相收发信息。
 
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -86,7 +88,8 @@ dsh-agent-message/
 │   └── client.js       # client 半区：复制会话ID按钮（已编译 factory 形式）
 ├── cordis.patch.yml    # 自注册补丁（dsh.bundle.patch 指向它）
 ├── package.json        # DSH 插件清单（dsh.bundle / dsh.client / dshx.contributes）
-└── README.md
+├── README.md           # 中文文档
+└── README.en.md        # English documentation
 ```
 
 ## 限制
