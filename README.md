@@ -24,7 +24,7 @@
 |---|---|
 | `list_peer_agents` | 列出所有**可发送（未归档）**的会话：id、标题、工作目录、状态（在线/离线）、类型（平级/子代理） |
 | `send_agent_message` | 给指定会话 ID 发消息；默认**立即送达**（在线引导 / 离线激活，失败兜底留言），支持五种显式模式 |
-| `check_delivery` | 按需查询消息回执（delivered/claimed/discarded/unknown），并单独返回目标运行状态，默认零播报 |
+| `check_delivery` | 按需查询消息回执（delivered/claimed/discarded/unknown）；指定消息 ID 时支持重启后恢复查询，并单独返回目标运行状态，默认零播报 |
 | 可导航的发送者消息头 | `user` 气泡的整行 `From Session · <名称>:` 和 relay 的 `From session @<ID>` 来源行均可点击或通过键盘打开发送方会话 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
 
@@ -109,7 +109,7 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 - **离线留言（leave）**：把 `agent/inbox/spliced` 事件**持久化追加**进目标会话的日志——目标下次被打开（resume）时，收件箱会重放该事件，消息就在那里；
 - **离线激活（wake）**：`agents.resume()` 恢复该会话（连同它记录的 agent preset），再 `followup()`，会话被唤醒并立即处理。
 
-回执状态来自收件箱事件：消息还在队列里是 `delivered`，被对方某轮认领是 `claimed`，被取消是 `discarded`；目标是否正在运行通过独立的 `targetStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。
+回执状态来自收件箱事件：消息还在队列里是 `delivered`，被对方某轮认领是 `claimed`，被取消是 `discarded`；目标是否正在运行通过独立的 `targetStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时，`check_delivery` 会直接从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
 
 `user` 消息的原始正文头包含发送者标题和完整会话 ID，界面只显示可导航的 `From Session · <名称>:` 消息头。`relay` 的正文不重复消息头，Harness 原生来源行显示为可导航的 `From session @<ID>`；两种形态的 `source` 元数据都保留发送者标题和纯 `session-...` ID。
 
@@ -131,7 +131,7 @@ dsh-agent-message/
 
 - 目标会话必须**未归档**且存在于本机持久化里；归档会话一律拒绝发送。
 - 离线激活（wake）会把目标会话以**默认模型**恢复运行（不继承它上次手动切换的模型选择）。
-- 回执记账是内存态：进程重启后 `check_delivery` 查不到重启前发出的消息（消息本身不受影响）；且只保留最近 1000 条发送记录（FIFO 淘汰）。
+- 不指定 `messageId` 的批量回执依赖内存记账，只覆盖本进程最近 1000 条发送记录（FIFO 淘汰）；进程重启后仍可凭已知 `messageId` 查询，但不再返回易失的 `sentAt` 和 `mode`。
 - 跨进程/跨机器通信不在本插件范围内。
 
 ## License

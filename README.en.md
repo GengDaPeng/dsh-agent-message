@@ -24,7 +24,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 |---|---|
 | `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
 | `send_agent_message` | Send a message to a session id; **immediate delivery by default** (online → steer; offline → wake, falling back to leave), plus five explicit modes |
-| `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown) with target runtime status reported separately; silent by default |
+| `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown); explicit message ids remain queryable after restart, with target runtime status reported separately; silent by default |
 | Navigable sender header | Both the `From Session · <name>:` line in `user` bubbles and the `From session @<ID>` source line in relay contexts can open the sender session by click or keyboard |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
@@ -108,7 +108,7 @@ Delivery paths of `send_agent_message`:
 - **Offline note (`leave`)**: append an `agent/inbox/spliced` event **durably** to the target session's log — when the session is next resumed, its inbox replays the event and the message is there (and the plugin wakes it so the note appears right away);
 - **Offline activation (`wake`)**: `agents.resume()` restores the session (together with its recorded agent preset), then `followup()` — the session is woken and processes the message immediately.
 
-Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message.
+Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message. When `messageId` is specified, `check_delivery` recovers the state directly from the target's existing Inbox log, so the lookup continues to work after a process restart.
 
 For `user` messages, the raw body header contains the sender title and full session id while the UI shows only a navigable `From Session · <name>:` header. `relay` does not repeat that header in the body; its native Harness source line is shown as a navigable `From session @<ID>`. Both forms retain the sender title and plain `session-...` id in `source` metadata.
 
@@ -130,7 +130,7 @@ dsh-agent-message/
 
 - The target session must be **non-archived** and present in local persistence; archived sessions are always rejected.
 - Offline activation (`wake`) resumes the target with the **default model** (it does not inherit a model manually selected earlier in that session).
-- Receipt bookkeeping is in-memory: after a process restart, `check_delivery` cannot see messages sent before the restart (the messages themselves are unaffected); only the most recent 1000 sent records are kept (FIFO eviction).
+- Bulk receipt queries without `messageId` rely on in-memory bookkeeping and cover only the most recent 1000 sends in the current process (FIFO eviction). After a restart, a known `messageId` remains queryable, but the volatile `sentAt` and `mode` fields are no longer returned.
 - Cross-process / cross-machine communication is out of scope.
 
 ## License

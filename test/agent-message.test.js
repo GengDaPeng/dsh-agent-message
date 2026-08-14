@@ -297,6 +297,34 @@ test('查询未记账的指定消息时显式返回 unknown', async () => {
   })
 })
 
+test('重启后凭 messageId 从目标日志恢复回执', async () => {
+  const persistence = {
+    readFrom: async () => ({
+      meta: { seedLength: 0 },
+      events: [{
+        seq: 0,
+        type: 'agent/inbox/spliced',
+        data: {
+          target: 'next-turn',
+          start: 0,
+          inserted: [{ id: 'agent-msg-before-restart' }],
+        },
+      }],
+    }),
+  }
+  const { tools } = setup({ services: { sessionPersistence: persistence } })
+
+  const result = await tools.get('check_delivery').execute({
+    to: 'session-target',
+    messageId: 'agent-msg-before-restart',
+  })
+
+  assert.deepEqual(result, {
+    to: 'session-target',
+    entries: [{ messageId: 'agent-msg-before-restart', state: 'delivered', targetStatus: 'offline' }],
+  })
+})
+
 test('批量查询同一离线会话的回执只读取一次日志', async () => {
   const sender = liveAgent('session-sender')
   const target = liveAgent('session-target')

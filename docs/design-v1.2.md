@@ -254,3 +254,9 @@ mode × 目标状态 矩阵：
 - relay 保持 Harness 上下文呈现，正文不重复 `From Session` 头；客户端只把原有来源行投影为可导航的 `From session @<ID>`，`source.senderSessionId` 仍保存纯稳定会话 ID。
 - Harness 与 `@deepseek-ai/dsh-tools` 兼容窗口明确为 `>=0.1.0-rc.6 <0.2.0`。
 - Host 公共工具测试扩展到列表合并、两种 source、离线恢复、失败降级和发送边界守卫。
+
+## 13. 回执连续性修订（待发布）
+
+- 指定 `messageId` 的 `check_delivery` 不再依赖发送方进程内记账，直接从目标会话现有 Inbox 日志恢复 `delivered / claimed / discarded / unknown`，因此 Harness 重启后仍可查询。
+- 不指定 `messageId` 的批量查询仍只读取本进程最近 1000 条发送记账；不新增持久化日志、索引、过期时间或清理任务。
+- 重启后恢复的结果不返回已经丢失的 `sentAt` 和 `mode`，避免用猜测填充历史信息。
