@@ -24,7 +24,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 |---|---|
 | `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
 | `send_agent_message` | Send a message to a session id; **immediate delivery by default** (online → steer; offline → wake, falling back to leave), plus five explicit modes |
-| `check_delivery` | Query message receipts on demand (delivered/claimed/processing/discarded); silent by default |
+| `check_delivery` | Query message receipts on demand (delivered/claimed/processing/discarded/unknown); silent by default |
 | Clean message bubbles | Received messages contain only "From Agent "title"" + body — no id, no reply prompts |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 

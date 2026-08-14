@@ -24,7 +24,7 @@
 |---|---|
 | `list_peer_agents` | 列出所有**可发送（未归档）**的会话：id、标题、工作目录、状态（在线/离线）、类型（平级/子代理） |
 | `send_agent_message` | 给指定会话 ID 发消息；默认**立即送达**（在线引导 / 离线激活，失败兜底留言），支持五种显式模式 |
-| `check_delivery` | 按需查询消息回执（delivered/claimed/processing/discarded），默认零播报 |
+| `check_delivery` | 按需查询消息回执（delivered/claimed/processing/discarded/unknown），默认零播报 |
 | 干净的消息气泡 | 收到的消息只有「来自 Agent「标题」」+ 正文，无 ID、无回复提示 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
 
