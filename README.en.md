@@ -41,10 +41,26 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 
 **Archived sessions are always rejected** (you are prompted to unarchive first); sending to yourself is also rejected.
 
+### Configuring the message form (`form`)
+
+Received messages render as **ordinary bubbles** by default; you can switch them to **collapsible context blocks** (aligned with the official "relay" semantics):
+
+| form | Rendering |
+|---|---|
+| `user` (default) | Ordinary message bubble, body shown in full |
+| `relay` | Collapsible context block, low-profile |
+
+Override the plugin entry in your profile's `cordis.patch.yml` (takes effect on hot reload, no restart needed):
+
+```yaml
+- id: agent-message
+  config:
+    form: relay
+```
+
 ## Installation
 
 ### Option 1: One-liner (recommended)
-
 ```sh
 dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
 ```
