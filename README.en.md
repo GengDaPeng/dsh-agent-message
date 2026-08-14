@@ -43,12 +43,12 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 
 ### Configuring the message form (`form`)
 
-Received messages render as **ordinary bubbles** by default; you can switch them to **collapsible context blocks** (aligned with the official "relay" semantics):
+The two forms differ not only visually — they carry different **intents**:
 
-| form | Rendering |
-|---|---|
-| `user` (default) | Ordinary message bubble, body shown in full |
-| `relay` | Collapsible context block, low-profile |
+| form | Rendering | Intent |
+|---|---|---|
+| `user` (default) | Ordinary message bubble | **Conversational**: like a human chat, a reply is expected |
+| `relay` | Collapsible context block | **Directive**: injected as context that quietly shapes the agent's later behavior — for instruction-style messages where no reply is expected |
 
 Override the plugin entry in your profile's `cordis.patch.yml` (takes effect on hot reload, no restart needed):
 
