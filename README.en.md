@@ -122,7 +122,7 @@ dsh-agent-message/
 
 - The target session must be **non-archived** and present in local persistence; archived sessions are always rejected.
 - Offline activation (`wake`) resumes the target with the **default model** (it does not inherit a model manually selected earlier in that session).
-- Receipt bookkeeping is in-memory: after a process restart, `check_delivery` cannot see messages sent before the restart (the messages themselves are unaffected).
+- Receipt bookkeeping is in-memory: after a process restart, `check_delivery` cannot see messages sent before the restart (the messages themselves are unaffected); only the most recent 1000 sent records are kept (FIFO eviction).
 - Cross-process / cross-machine communication is out of scope.
 
 ## License
