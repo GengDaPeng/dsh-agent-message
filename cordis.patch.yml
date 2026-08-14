@@ -1,7 +1,7 @@
 # dsh-agent-message bundle patch：把插件挂进 profile 的宿主组合（自注册）。
 # 由 package.json 的 dsh.bundle.patch 指向本文件，安装后自动挂载、全局可用。
 #
-# 可选配置：消息渲染形态 form（默认 bubble=普通气泡；relay=折叠上下文块）。
+# 可选配置：消息渲染形态 form —— user=普通气泡（默认）；relay=折叠上下文块。
 # 需要切换时，在你的 profile 的 cordis.patch.yml 里覆盖此条目：
 #
 #   - id: agent-message
