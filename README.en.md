@@ -132,6 +132,11 @@ dsh-agent-message/
 └── README.en.md        # English documentation
 ```
 
+## In Development
+
+- **`@` session lookup:** Find and select a target session with `@`, without manually retrieving or entering its session ID.
+- **Cross-process communication:** Allow Agent sessions running in different DSH processes to exchange messages.
+
 ## Limitations
 
 - The target session must be **non-archived** and present in local persistence; archived sessions are always rejected.
