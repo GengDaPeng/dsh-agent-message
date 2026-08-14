@@ -14,7 +14,7 @@ In DeepSeek Harness, a single process hosts multiple Agent sessions at once. Thi
 
 - Before sending, first **list every sendable session** (all non-archived ones are listed, including offline ones that haven't been reopened), and find the target by its title;
 - Once found, **deliver the message to the target session** — if the target is online, its current work is steered immediately; if it is offline (not loaded since the last process restart), it is **activated automatically** and then messaged, falling back to a **note** (visible when it is next opened) if activation fails;
-- When needed, **query the delivery status of a message on demand** (delivered / read / processing / discarded) for supervision scenarios.
+- When needed, **query the delivery status of a message on demand** (queued / claimed / discarded / unknown), with the target runtime status reported separately for supervision scenarios.
 
 Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, two Agents collaborating in a relay, a main session sending instructions to a test session, or a supervisor Agent watching over several workers.
 
@@ -24,8 +24,8 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 |---|---|
 | `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
 | `send_agent_message` | Send a message to a session id; **immediate delivery by default** (online → steer; offline → wake, falling back to leave), plus five explicit modes |
-| `check_delivery` | Query message receipts on demand (delivered/claimed/processing/discarded/unknown); silent by default |
-| Clean message bubbles | Received messages contain only "From Agent "title"" + body — no id, no reply prompts |
+| `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown) with target runtime status reported separately; silent by default |
+| Navigable sender header | The entire `From Agent · <name>:` line is a link; click it, or focus it and press Enter/Space, to open the sender session |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
 ### Delivery modes (the `mode` parameter of `send_agent_message`)
@@ -84,7 +84,7 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 1. Tell session A "list the sendable Agents" — it calls `list_peer_agents`;
 2. Note down the target session's `id` (or have the other side click the "Copy ID" button);
 3. Say "send a message to `<session id>`: ..." — it calls `send_agent_message`; online targets are messaged immediately, offline targets are activated automatically (or left a note on failure);
-4. Session B receives a message bubble with a "From Agent "title"" header.
+4. Session B receives a `From Agent · <name>:` header; clicking the whole line opens the sender session.
 5. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
 
 ## How it works
@@ -100,9 +100,9 @@ Delivery paths of `send_agent_message`:
 - **Offline note (`leave`)**: append an `agent/inbox/spliced` event **durably** to the target session's log — when the session is next resumed, its inbox replays the event and the message is there (and the plugin wakes it so the note appears right away);
 - **Offline activation (`wake`)**: `agents.resume()` restores the session (together with its recorded agent preset), then `followup()` — the session is woken and processes the message immediately.
 
-Receipt states come from the inbox events and the target's running state: still queued is `delivered`, claimed by one of the target's turns is `claimed`, target running is `processing`, cancelled is `discarded`.
+Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message.
 
-The message body contains only "From Agent "title"" and the content; the sender's session id is recorded in the message's `source` metadata (invisible). So the message itself is clean and traceless, and whether to reply is entirely up to the receiving user.
+The raw message header contains the sender title and full session id, while the same id remains in `source` metadata so the receiving Agent can reply precisely. The default bubble shows users only a navigable `From Agent · <name>:` header; the full id is not rendered in the UI.
 
 ## Directory structure
 

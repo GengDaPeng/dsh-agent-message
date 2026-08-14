@@ -36,8 +36,8 @@
 │   ├── leave（留言）：目标在线=排队投递；离线=持久化写入 inbox 事件，不唤醒
 │   └── wake（激活）：目标在线=followup；离线=resume + followup
 ├── 消息生命周期状态机（见 §3）
-│   └── sent → delivered(排队中) → claimed(已读) → processing(处理中) → done
-│       └── 旁路：discarded(被丢弃)
+│   └── sent → delivered(排队中) → claimed(已认领)
+│       └── 旁路：discarded(被丢弃)；targetStatus 独立描述 Agent 运行态
 └── 可发送列表（list_peer_agents v2）
     ├── 数据源：持久化会话 ∪ 在线会话 − 归档集合
     └── 每行：id / 标题(带兜底) / cwd / 状态(idle|running|offline) / 类型(peer|subagent) / self
@@ -47,7 +47,7 @@
 
 | 类别 | 设计结论 | 正式落点 | 证据 / 验证 |
 |---|---|---|---|
-| **状态** | 消息状态机：`sent`（我方已发出并记账）→ `delivered`（消息在对方 inbox：在线查 `target.inbox`，离线 fold 日志确认仍在排队）→ `claimed`（对方某轮认领，inbox 不再包含该 id，且无 `canceled` 标记）→ `processing`（对方 `status === running`）→ `done`（对方回合结束且消息已消费）。旁路 `discarded`（inbox splice 带 `outcome: 'canceled'`） | `lib/index.js`（状态判定函数）+ 本文件 | 单测：用真实会话日志样本 fold inbox；E2E：三态实测 |
+| **状态** | 消息状态机：`sent`（我方已发出并记账）→ `delivered`（消息在对方 inbox）→ `claimed`（对方某轮认领）。旁路 `discarded`（inbox splice 带 `outcome: 'canceled'`）；`unknown` 表示无可核验证据。Agent 的 `targetStatus` 独立返回，不推断某条消息正在处理或已经完成。 | `lib/index.js`（状态判定函数）+ 本文件 | 单测：用真实会话日志样本 fold inbox；E2E：状态与 Inbox 事实一致 |
 | **数据** | ①可发送集合 = `sessionPersistence.list()` ∪ `agents.list()` − `workspaceRegistry.archivedSessionIds`；②发送方维护内存记账表 `sent: Map<messageId, {to, at, mode}>`（插件生命周期内有效，进程重启后丢失——接受此限制）；③留言消息复用现有 `UserMessage` 结构（`source.kind='user'` + `senderSessionId`/`senderTitle` 元数据），离线序列化无损 | `lib/index.js`；数据模型沿用 v1.0 | 实测：9 可发送/2 归档；`check_delivery` 返回与实况一致 |
 | **执行** | ①列表工具：三条数据源合并去重、剔除归档、补标题（`sessionQuery.readTitleSnapshots`）；②`leave` 离线路径：`prepare(to)` → fold 该会话日志里的 `agent/inbox/spliced` 得到当前 inbox 长度 → `session.append('agent/inbox/spliced', {target:'next-turn', start, inserted:[message]})` → `sessions.flush` → `release`；③`wake` 离线路径：解析会话记录的 preset → `agents.resume({resumeSessionId, agentOptions, setup})` → `followup`；④`check_delivery`：查在线 inbox 或 fold 离线日志判定状态 | `lib/index.js`（新增 `mailbox` 逻辑 + 工具） | E2E：离线留言 → 打开会话 → 消息重放出现 |
 | **持久证据** | 留言的持久证据就是目标会话日志里的 `agent/inbox/spliced` 事件（append 即持久化）；记账表是内存态、非持久证据，只在"回执查询"这一易失能力里使用 | 持久化后端 | 验证：留言后重启进程，打开目标会话消息仍在 |
@@ -117,18 +117,10 @@ mode × 目标状态 矩阵：
                  │  │ discarded  │ 被丢弃（终态）
                  ▼  └────────────┘
               ┌────────────┐
-              │  claimed   │ 已读（被对方认领）
-              └─────┬──────┘
-                    │ 对方 status === 'running'
-                    ▼
-              ┌────────────┐
-              │ processing │ 处理中
-              └─────┬──────┘
-                    │ 对方回合结束（消息已消费、非丢弃）
-                    ▼
-              ┌────────────┐
-              │    done    │ 完成（终态）
+              │  claimed   │ 已被对方认领；消息级证据到此为止
               └────────────┘
+
+ targetStatus = offline | idle | running（独立的 Agent 运行状态）
 ```
 
 ## 4. 结构问题判定
@@ -176,7 +168,7 @@ mode × 目标状态 矩阵：
 
 ```
 参数：{ to: SessionId, messageId?: string }
-返回：{ to, entries: [{ messageId, sentAt, mode, state: 'delivered'|'claimed'|'processing'|'done'|'discarded', targetStatus }] }
+返回：{ to, entries: [{ messageId, sentAt?, mode?, state: 'delivered'|'claimed'|'discarded'|'unknown', targetStatus }] }
 原则：默认安静——工具不做任何主动播报；只有监督者 Agent 调用它时才返回状态。上下文零污染。
 ```
 
@@ -195,7 +187,7 @@ mode × 目标状态 矩阵：
 
 ## 6. 纵向闭环
 
-- **目标/边界**：消息在"发送 → 送达 → 已读 → 处理"四个状态内闭环；超出（对方已删除会话、会话跨进程）明确报错，不猜。
+- **目标/边界**：消息只报告 Inbox 能证明的"排队 → 已认领 / 被丢弃"；目标运行态独立返回，无法核验的状态明确为 `unknown`，不猜处理进度或完成结果。
 - **状态/异常**：每个异常分支（未知会话/归档/离线+在线专属模式/自己发自己）都有独立报错文案；wake 激活失败自动降级 leave 并如实回报；leave 写入失败时（persistence 拒绝）报错且不记账。
 - **权限/审计**：v1.1 无权限模型（本机进程内即信任边界，与 v1.0 一致）；不留审计日志，明确为不做项。
 - **测试/验证**：见 §9。
@@ -224,11 +216,11 @@ mode × 目标状态 矩阵：
 
 ## 9. 阶段切分与验证计划
 
-- **当前必须做**：F1 列表升级、F2 离线投递（默认 wake 激活 + 失败兜底 leave，含归档/自己/未知守卫）、F3 check_delivery（delivered/claimed/processing 三态）。wake 的 resume+preset 挂载是必攻克项，不再延后。
-- **建议做**：done 态与 discarded 态的完整覆盖、记账表持久化。
+- **当前必须做**：F1 列表升级、F2 离线投递（默认 wake 激活 + 失败兜底 leave，含归档/自己/未知守卫）、F3 check_delivery（delivered/claimed/discarded/unknown）。wake 的 resume+preset 挂载是必攻克项，不再延后。
+- **建议做**：记账表持久化；只有建立 messageId → turnId 的正式关联后才考虑完成态。
 - **明确不做（v1.1）**：client 提醒/角标/一键回复、白名单、审计、跨进程。
 - **单测**：inbox fold 正确性（构造含 splice 事件的日志样本）；目标判定分支（live/offline/archived/unknown/self）。
-- **集成/E2E**：①给离线会话发消息（默认）→ 目标被自动激活并处理；激活失败时降级留言，重启/打开后消息重放出现；②显式 leave → 重启进程 → 打开该会话，消息重放出现；③归档会话发送被拒并给出正确文案；④在线三模式回归（v1.0 行为不回退）；⑤check_delivery 在"送达→对方开始处理"两刻各查一次，状态与实况一致。
+- **集成/E2E**：①给离线会话发消息（默认）→ 目标被自动激活并处理；激活失败时降级留言，重启/打开后消息重放出现；②显式 leave → 重启进程 → 打开该会话，消息重放出现；③归档会话发送被拒并给出正确文案；④在线三模式回归（v1.0 行为不回退）；⑤check_delivery 的状态与 Inbox 事实一致，Agent 运行态只出现在 `targetStatus`。
 - **截图**：`list_peer_agents` 新返回（含 offline/kind/无标题兜底）。
 - **日志/审计**：无新增。
 - **门禁**：安装后重启 harness 冒烟（与 v1.0 同流程）。
@@ -243,3 +235,13 @@ mode × 目标状态 矩阵：
   5. 回执 v1.1 不做"已回复"态 ✅
 - **需要审查复核**：leave 离线路径与"目标瞬间上线"的并发行为（依赖持久化后端 revision 检查，实现时验证）。
 - **证据不足**：客户端绿点/未读水印机制（二期前置调研项）。
+
+## 11. v1.3.0 可靠性修订（2026-08-14）
+
+- 在线 `leave` 直接写 `target.inbox.append('next-turn', message)`，不再通过会唤醒驱动器的 `followup()`。
+- `agent/session-start` 只在 `next-turn` 中存在本插件消息时唤醒，不能消费其他插件刻意保留的非唤醒输入。
+- 原始消息头携带发送者名称和完整会话 ID，供接收 Agent 精确回复；默认气泡把整行 `From Agent · <名称>:` 渲染为可点击、可键盘导航的链接，完整 ID 不向用户展示。
+- 离线 append 遇到持久化序号竞争时重新读取并重试一次；Harness 的连续序号校验继续负责拒绝冲突写入。
+- 回执只陈述 Inbox 能证明的 `delivered / claimed / discarded / unknown`；`targetStatus` 独立返回。指定未记账的 `messageId` 时显式返回 `unknown`，不再返回空数组。
+- 同一次 `check_delivery` 只读取并折叠目标会话一次，再复用该快照判断全部消息，避免批量查询退化为“消息数 × 全日志”。持久增量投影仍留作后续优化。
+- 验证：`node --test` 覆盖上述 host 合同；客户端导航通过真实 Web profile 冒烟验证。
