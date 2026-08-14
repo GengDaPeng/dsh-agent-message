@@ -69,18 +69,24 @@
 ### 方式一：一行命令（推荐）
 
 ```sh
-dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
+dsh plugin --profile web add dsh-agent-message
 ```
 
 装完即自动注册，无需任何额外配置。
 
-兼容范围：DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`；当前验证版本为 `0.1.0-rc.6`。
+兼容范围：Node.js 24、DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`；当前验证版本为 Node.js `24.x`、Harness `0.1.0-rc.6`。
 
-### 方式二：直接发给你的 Agent
+### 方式二：从 GitHub 安装
+
+```sh
+dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
+```
+
+### 方式三：直接发给你的 Agent
 
 打开任意一个 DSH 会话，把下面这句话发给它：
 
-> 帮我安装跨会话通信插件，执行：`dsh plugin --profile web add github:GengDaPeng/dsh-agent-message`
+> 帮我安装跨会话通信插件，执行：`dsh plugin --profile web add dsh-agent-message`
 
 Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即可用。
 

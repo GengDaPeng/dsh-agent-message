@@ -1,8 +1,15 @@
 {
   "name": "dsh-agent-message",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "packageManager": "pnpm@11.1.1",
   "description": "跨会话 Agent 通信：让 DeepSeek Harness 里不同的 Agent 会话互相收发消息。",
+  "keywords": ["deepseek", "deepseek-harness", "agent", "multi-agent", "messaging"],
+  "homepage": "https://github.com/GengDaPeng/dsh-agent-message#readme",
+  "bugs": { "url": "https://github.com/GengDaPeng/dsh-agent-message/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GengDaPeng/dsh-agent-message.git"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "scripts": { "test": "node --test" },
@@ -12,6 +19,7 @@
     "./package.json": "./package.json"
   },
   "files": ["lib", "cordis.patch.yml", "docs/assets/message-header-navigation.jpg"],
+  "publishConfig": { "access": "public" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
@@ -37,8 +45,8 @@
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   },
   "engines": {
+    "node": ">=24 <25",
     "dsh": ">=0.1.0-rc.6 <0.2.0"
   },
-  "license": "MIT",
-  "private": true
+  "license": "MIT"
 }

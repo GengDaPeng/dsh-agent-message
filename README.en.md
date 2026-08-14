@@ -68,18 +68,24 @@ Override the plugin entry in your profile's `cordis.patch.yml` (takes effect on 
 
 ### Option 1: One-liner (recommended)
 ```sh
-dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
+dsh plugin --profile web add dsh-agent-message
 ```
 
 It self-registers on install; no extra configuration is needed.
 
-Compatibility: DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`; the currently verified version is `0.1.0-rc.6`.
+Compatibility: Node.js 24 and DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`; currently verified with Node.js `24.x` and Harness `0.1.0-rc.6`.
 
-### Option 2: Just tell your Agent
+### Option 2: Install from GitHub
+
+```sh
+dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
+```
+
+### Option 3: Just tell your Agent
 
 Open any DSH session and send it this message:
 
-> Help me install the cross-session communication plugin by running: `dsh plugin --profile web add github:GengDaPeng/dsh-agent-message`
+> Help me install the cross-session communication plugin by running: `dsh plugin --profile web add dsh-agent-message`
 
 The Agent will run this command via bash; once installed it auto-mounts and is immediately available to all sessions.
 
