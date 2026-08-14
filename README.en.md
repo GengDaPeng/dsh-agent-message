@@ -28,6 +28,12 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 | Navigable sender header | The entire `From Agent · <name>:` line is a link; click it, or focus it and press Enter/Space, to open the sender session |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
+### Sender navigation example
+
+![Clickable sender header example](./docs/assets/message-header-navigation.jpg)
+
+Users see only the sending Agent's name and can open its session by clicking the whole line. The full session id remains available to the receiving Agent in the raw message and metadata for precise identification and replies.
+
 ### Delivery modes (the `mode` parameter of `send_agent_message`)
 
 | mode | Meaning |
@@ -110,10 +116,10 @@ The raw message header contains the sender title and full session id, while the 
 dsh-agent-message/
 ├── lib/
 │   ├── index.js        # host half: list_peer_agents / send_agent_message / check_delivery
-│   └── client.js       # client half: copy-session-id button (compiled factory form)
+│   └── client.js       # client half: sender-session navigation and copy-session-id button
 ├── cordis.patch.yml    # self-registration patch (pointed to by dsh.bundle.patch)
 ├── package.json        # DSH plugin manifest (dsh.bundle / dsh.client / dshx.contributes)
-├── docs/               # design notes (design-v1.2.md)
+├── docs/               # design notes and README example screenshot
 ├── README.md           # Chinese documentation
 └── README.en.md        # English documentation
 ```

@@ -28,6 +28,12 @@
 | 可导航的发送者消息头 | 整行 `From Agent · <名称>:` 都是链接；点击或聚焦后按 Enter/Space 可直接打开发送方会话 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
 
+### 消息头跳转示例
+
+![可点击的发送者消息头示例](./docs/assets/message-header-navigation.jpg)
+
+用户只看到发送 Agent 的名称；点击整行即可打开发送方会话。完整会话 ID 仍保留在原始消息和元数据中，供接收 Agent 准确识别与回复。
+
 ### 投递模式（`send_agent_message` 的 `mode` 参数）
 
 | mode | 含义 |
@@ -111,10 +117,10 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 dsh-agent-message/
 ├── lib/
 │   ├── index.js        # host 半区：list_peer_agents / send_agent_message / check_delivery
-│   └── client.js       # client 半区：复制会话ID按钮（已编译 factory 形式）
+│   └── client.js       # client 半区：发送方会话导航与复制会话ID按钮
 ├── cordis.patch.yml    # 自注册补丁（dsh.bundle.patch 指向它）
 ├── package.json        # DSH 插件清单（dsh.bundle / dsh.client / dshx.contributes）
-├── docs/               # 设计稿（design-v1.2.md）
+├── docs/               # 设计稿与 README 示例截图
 ├── README.md           # 中文文档
 └── README.en.md        # English documentation
 ```
