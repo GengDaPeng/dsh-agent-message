@@ -240,8 +240,17 @@ mode × 目标状态 矩阵：
 
 - 在线 `leave` 直接写 `target.inbox.append('next-turn', message)`，不再通过会唤醒驱动器的 `followup()`。
 - `agent/session-start` 只在 `next-turn` 中存在本插件消息时唤醒，不能消费其他插件刻意保留的非唤醒输入。
-- 原始消息头携带发送者名称和完整会话 ID，供接收 Agent 精确回复；默认气泡把整行 `From Agent · <名称>:` 渲染为可点击、可键盘导航的链接，完整 ID 不向用户展示。
+- `user` 原始消息头携带发送者名称和完整会话 ID，供接收 Agent 精确回复；默认气泡把整行 `From Session · <名称>:` 渲染为可点击、可键盘导航的链接，完整 ID 不向用户展示。
 - 离线 append 遇到持久化序号竞争时重新读取并重试一次；Harness 的连续序号校验继续负责拒绝冲突写入。
 - 回执只陈述 Inbox 能证明的 `delivered / claimed / discarded / unknown`；`targetStatus` 独立返回。指定未记账的 `messageId` 时显式返回 `unknown`，不再返回空数组。
 - 同一次 `check_delivery` 只读取并折叠目标会话一次，再复用该快照判断全部消息，避免批量查询退化为“消息数 × 全日志”。持久增量投影仍留作后续优化。
 - 验证：`node --test` 覆盖上述 host 合同；客户端导航通过真实 Web profile 冒烟验证。
+
+## 12. v1.3.1 稳定化修订（2026-08-14）
+
+- `list_peer_agents` 将持久化 header 一次索引为 `Map`，会话合并由 O(n²) 降为 O(n)。
+- `user` 与 `relay` 共用一份发送者 `source` 构造，插件名、形态、标题和稳定会话 ID 不再分支重复。
+- 复制会话 ID 只有在 Clipboard API 或后备复制真实成功后才显示「已复制」，失败时明确显示「复制失败」。
+- relay 保持 Harness 上下文呈现，正文不重复 `From Session` 头；客户端只把原有来源行投影为可导航的 `From session @<ID>`，`source.senderSessionId` 仍保存纯稳定会话 ID。
+- Harness 与 `@deepseek-ai/dsh-tools` 兼容窗口明确为 `>=0.1.0-rc.6 <0.2.0`。
+- Host 公共工具测试扩展到列表合并、两种 source、离线恢复、失败降级和发送边界守卫。

@@ -25,7 +25,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 | `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
 | `send_agent_message` | Send a message to a session id; **immediate delivery by default** (online → steer; offline → wake, falling back to leave), plus five explicit modes |
 | `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown) with target runtime status reported separately; silent by default |
-| Navigable sender header | The entire `From Agent · <name>:` line is a link; click it, or focus it and press Enter/Space, to open the sender session |
+| Navigable sender header | Both the `From Session · <name>:` line in `user` bubbles and the `From session @<ID>` source line in relay contexts can open the sender session by click or keyboard |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
 ### Sender navigation example
@@ -73,6 +73,8 @@ dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
 
 It self-registers on install; no extra configuration is needed.
 
+Compatibility: DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`; the currently verified version is `0.1.0-rc.6`.
+
 ### Option 2: Just tell your Agent
 
 Open any DSH session and send it this message:
@@ -90,7 +92,7 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 1. Tell session A "list the sendable Agents" — it calls `list_peer_agents`;
 2. Note down the target session's `id` (or have the other side click the "Copy ID" button);
 3. Say "send a message to `<session id>`: ..." — it calls `send_agent_message`; online targets are messaged immediately, offline targets are activated automatically (or left a note on failure);
-4. Session B receives a `From Agent · <name>:` header; clicking the whole line opens the sender session.
+4. For `user` messages, click `From Session · <name>:` to open the sender; `relay` keeps Harness's context presentation and exposes the same navigation through its existing `From session @<ID>` source line.
 5. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
 
 ## How it works
@@ -108,7 +110,7 @@ Delivery paths of `send_agent_message`:
 
 Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message.
 
-The raw message header contains the sender title and full session id, while the same id remains in `source` metadata so the receiving Agent can reply precisely. The default bubble shows users only a navigable `From Agent · <name>:` header; the full id is not rendered in the UI.
+For `user` messages, the raw body header contains the sender title and full session id while the UI shows only a navigable `From Session · <name>:` header. `relay` does not repeat that header in the body; its native Harness source line is shown as a navigable `From session @<ID>`. Both forms retain the sender title and plain `session-...` id in `source` metadata.
 
 ## Directory structure
 

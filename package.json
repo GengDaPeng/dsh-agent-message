@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-message",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "跨会话 Agent 通信：让 DeepSeek Harness 里不同的 Agent 会话互相收发消息。",
   "type": "module",
   "main": "./lib/index.js",
@@ -10,7 +10,7 @@
     "./client": { "default": "./lib/client.js" },
     "./package.json": "./package.json"
   },
-  "files": ["lib", "cordis.patch.yml"],
+  "files": ["lib", "cordis.patch.yml", "docs/assets/message-header-navigation.jpg"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
@@ -30,13 +30,13 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "*"
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
   },
   "engines": {
-    "dsh": ">=0.0.1"
+    "dsh": ">=0.1.0-rc.6 <0.2.0"
   },
   "license": "MIT",
   "private": true

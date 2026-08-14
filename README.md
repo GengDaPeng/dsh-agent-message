@@ -25,7 +25,7 @@
 | `list_peer_agents` | 列出所有**可发送（未归档）**的会话：id、标题、工作目录、状态（在线/离线）、类型（平级/子代理） |
 | `send_agent_message` | 给指定会话 ID 发消息；默认**立即送达**（在线引导 / 离线激活，失败兜底留言），支持五种显式模式 |
 | `check_delivery` | 按需查询消息回执（delivered/claimed/discarded/unknown），并单独返回目标运行状态，默认零播报 |
-| 可导航的发送者消息头 | 整行 `From Agent · <名称>:` 都是链接；点击或聚焦后按 Enter/Space 可直接打开发送方会话 |
+| 可导航的发送者消息头 | `user` 气泡的整行 `From Session · <名称>:` 和 relay 的 `From session @<ID>` 来源行均可点击或通过键盘打开发送方会话 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
 
 ### 消息头跳转示例
@@ -74,6 +74,8 @@ dsh plugin --profile web add github:GengDaPeng/dsh-agent-message
 
 装完即自动注册，无需任何额外配置。
 
+兼容范围：DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`；当前验证版本为 `0.1.0-rc.6`。
+
 ### 方式二：直接发给你的 Agent
 
 打开任意一个 DSH 会话，把下面这句话发给它：
@@ -91,7 +93,7 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 1. 对会话 A 说「列出可发送的其它 Agent」——它会调 `list_peer_agents`；
 2. 记下目标会话的 `id`（或让对方点「复制ID」按钮）；
 3. 说「给 `<会话ID>` 发消息：……」——它会调 `send_agent_message`，目标在线立即送达、离线自动激活（失败则留言）；
-4. 会话 B 收到一条 `From Agent · <名称>:` 消息头；点击整行可直接打开发送方会话。
+4. 会话 B 以 `user` 形态收到消息时可点击 `From Session · <名称>:`；`relay` 保持 Harness 上下文形态，并可通过原有的 `From session @<ID>` 来源行打开发送方会话。
 5. （监督场景）说「查一下我发给 `<会话ID>` 的消息状态」——它会调 `check_delivery`。
 
 ## 原理
@@ -109,7 +111,7 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 
 回执状态来自收件箱事件：消息还在队列里是 `delivered`，被对方某轮认领是 `claimed`，被取消是 `discarded`；目标是否正在运行通过独立的 `targetStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。
 
-消息原始正文头包含发送者标题和完整会话 ID，`source` 元数据同时保留同一 ID，确保接收 Agent 能准确回复。默认气泡只向用户显示可导航的 `From Agent · <名称>:` 消息头，完整 ID 不在界面展示。
+`user` 消息的原始正文头包含发送者标题和完整会话 ID，界面只显示可导航的 `From Session · <名称>:` 消息头。`relay` 的正文不重复消息头，Harness 原生来源行显示为可导航的 `From session @<ID>`；两种形态的 `source` 元数据都保留发送者标题和纯 `session-...` ID。
 
 ## 目录结构
 
