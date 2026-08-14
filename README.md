@@ -10,20 +10,21 @@
 
 ## 这是什么
 
-在 DeepSeek Harness 里，一个进程会同时挂着多个 Agent 会话。本插件给每个会话装上两个工具，让它们能互相"发消息"：
+在 DeepSeek Harness 里，一个进程会同时挂着多个 Agent 会话。本插件给每个会话装上三个工具，让它们能互相"发消息"：
 
-- 发消息前，先**列出在线的其它会话**，按标题找到目标；
-- 找到后，**把消息投递到目标会话**（默认引导它当前的工作，也可排一条新轮次或静默注入）；
-- 对方收到的是**一条正常的消息气泡**，标题头标明「来自 Agent「xxx」」，正文就是消息内容。
+- 发消息前，先**列出所有可发送的会话**（未归档的都在列，含离线未打开的），按标题找到目标；
+- 找到后，**把消息投递到目标会话**——目标在线就立即引导它当前的工作；目标离线（进程重启后还没打开）就**自动把它激活**再投递，激活失败则自动转为**留言**（下次打开可见）；
+- 需要时，可以**按需查询**某条消息的送达状态（送达/已读/处理中/被丢弃），供监督场景使用。
 
-典型场景：编排者 Agent 给开发 Agent 派活、两个 Agent 协作接力、主会话给测试会话发指令。
+典型场景：编排者 Agent 给开发 Agent 派活、两个 Agent 协作接力、主会话给测试会话发指令、监督者 Agent 盯梢多个 worker。
 
 ## 功能
 
 | 能力 | 说明 |
 |---|---|
-| `list_peer_agents` | 列出当前进程里在线（已注册）的其它会话：id、标题、工作目录 |
-| `send_agent_message` | 给指定会话 ID 发消息，支持三种投递模式 |
+| `list_peer_agents` | 列出所有**可发送（未归档）**的会话：id、标题、工作目录、状态（在线/离线）、类型（平级/子代理） |
+| `send_agent_message` | 给指定会话 ID 发消息；默认**立即送达**（在线引导 / 离线激活，失败兜底留言），支持五种显式模式 |
+| `check_delivery` | 按需查询消息回执（delivered/claimed/processing/discarded），默认零播报 |
 | 干净的消息气泡 | 收到的消息只有「来自 Agent「标题」」+ 正文，无 ID、无回复提示 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
 
@@ -31,9 +32,14 @@
 
 | mode | 含义 |
 |---|---|
-| `steer`（默认） | 引导对方当前的工作 |
-| `followup` | 给对方排一条新的独立轮次 |
-| `inject` | 静默注入下一步，但不唤醒 |
+| （默认，不传） | **立即送达**：在线 → `steer`；离线 → `wake`（激活失败自动转 `leave`） |
+| `steer` | 引导对方当前的工作（仅在线） |
+| `followup` | 给对方排一条新的独立轮次（仅在线） |
+| `inject` | 静默注入下一步，但不唤醒（仅在线） |
+| `leave` | 留言：写进对方收件箱但不唤醒；离线会话就是"留言板" |
+| `wake` | 激活：离线会话先 `resume` 再投递；在线等价于 `followup` |
+
+**归档的会话一律拒绝发送**（提示先取消归档）；发给自己也会被拒绝。
 
 ## 安装
 
@@ -55,14 +61,15 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 
 ### 装完自动发生了什么
 
-插件自带 `cordis.patch.yml`（由 `package.json` 的 `dsh.bundle.patch` 指向），安装后自动把自己挂进宿主组合——所以你**不需要**手动改 preset、改 `cordis.patch.yml`。所有会话自动获得 `list_peer_agents` 和 `send_agent_message`。
+插件自带 `cordis.patch.yml`（由 `package.json` 的 `dsh.bundle.patch` 指向），安装后自动把自己挂进宿主组合——所以你**不需要**手动改 preset、改 `cordis.patch.yml`。所有会话自动获得 `list_peer_agents`、`send_agent_message` 和 `check_delivery`。
 
 ## 使用
 
-1. 对会话 A 说「列出在线的其它 Agent」——它会调 `list_peer_agents`；
+1. 对会话 A 说「列出可发送的其它 Agent」——它会调 `list_peer_agents`；
 2. 记下目标会话的 `id`（或让对方点「复制ID」按钮）；
-3. 说「给 `<会话ID>` 发消息：……」——它会调 `send_agent_message`；
+3. 说「给 `<会话ID>` 发消息：……」——它会调 `send_agent_message`，目标在线立即送达、离线自动激活（失败则留言）；
 4. 会话 B 收到一条「来自 Agent「标题」」头部的消息气泡。
+5. （监督场景）说「查一下我发给 `<会话ID>` 的消息状态」——它会调 `check_delivery`。
 
 ## 原理
 
@@ -71,11 +78,13 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 - `next-turn`：排队等待作为**独立一轮**处理的消息；
 - `next-step`：当前轮次内、**下一步边界**消费的引导输入。
 
-`send_agent_message` 通过 `agents` 注册表找到目标 Agent，再把一条 `UserMessage` 投递进它的收件箱，对应三种模式：
+`send_agent_message` 的投递路径：
 
-- `steer` → 写入 `next-step` 并唤醒；
-- `followup` → 写入 `next-turn` 并唤醒；
-- `inject` → 写入 `next-step` 但不唤醒。
+- **在线**：通过 `agents` 注册表找到目标 Agent，调 `steer()` / `followup()` / `inject()` 写入其收件箱；
+- **离线留言（leave）**：把 `agent/inbox/spliced` 事件**持久化追加**进目标会话的日志——目标下次被打开（resume）时，收件箱会重放该事件，消息就在那里；
+- **离线激活（wake）**：`agents.resume()` 恢复该会话（连同它记录的 agent preset），再 `followup()`，会话被唤醒并立即处理。
+
+回执状态来自收件箱事件与对方运行状态：消息还在队列里是 `delivered`，被对方某轮认领是 `claimed`，对方正在跑是 `processing`，被取消是 `discarded`。
 
 消息正文只含「来自 Agent「标题」」和内容；发送者会话 ID 记录在消息的 `source` 元数据里（不可见）。因此消息本身干净无痕，是否回信完全由接收端用户决定。
 
@@ -84,17 +93,21 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 ```
 dsh-agent-message/
 ├── lib/
-│   ├── index.js        # host 半区：list_peer_agents / send_agent_message
+│   ├── index.js        # host 半区：list_peer_agents / send_agent_message / check_delivery
 │   └── client.js       # client 半区：复制会话ID按钮（已编译 factory 形式）
 ├── cordis.patch.yml    # 自注册补丁（dsh.bundle.patch 指向它）
 ├── package.json        # DSH 插件清单（dsh.bundle / dsh.client / dshx.contributes）
+├── docs/               # 设计稿（design-v1.2.md）
 ├── README.md           # 中文文档
 └── README.en.md        # English documentation
 ```
 
 ## 限制
 
-- 目标会话必须是**当前进程里在线（已注册）**的 Agent（`agents.get(id)` 只能找到在线的）；离线会话需先 resume，本插件暂不处理。
+- 目标会话必须**未归档**且存在于本机持久化里；归档会话一律拒绝发送。
+- 离线激活（wake）会把目标会话以**默认模型**恢复运行（不继承它上次手动切换的模型选择）。
+- 回执记账是内存态：进程重启后 `check_delivery` 查不到重启前发出的消息（消息本身不受影响）。
+- 跨进程/跨机器通信不在本插件范围内。
 
 ## License
 
