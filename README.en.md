@@ -12,8 +12,8 @@ English | [中文](./README.md)
 
 In DeepSeek Harness, a single process hosts multiple Agent sessions at once. This plugin equips each session with three tools so they can "message" each other:
 
-- Before sending, first **list every sendable session** (all non-archived ones are listed, including offline ones that haven't been reopened), and find the target by its title;
-- Once found, **deliver the message to the target session** — ordinary messages always enter a new independent turn; if the target is offline (not loaded since the last process restart), the plugin resumes it through Harness's public API, delivers the message, and releases the runtime after processing;
+- Before sending, first **list every sendable independent session** (non-archived, excluding actual subagents, including offline sessions that have not been reopened), and find the target by its title;
+- Once found, **deliver the message to the target session** — ordinary messages always enter a new independent turn; if the target is offline (not loaded since the last process restart), the plugin resumes it through Harness's public API, delivers the message, and keeps the handle loaded for later communication until plugin teardown;
 - When needed, **query the delivery status of a message on demand** (queued / claimed / discarded / unknown), with the target runtime status reported separately for supervision scenarios.
 
 Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, two Agents collaborating in a relay, a main session sending instructions to a test session, or a supervisor Agent watching over several workers.
@@ -33,7 +33,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 
 ![Clickable sender header example](./docs/assets/message-header-navigation.jpg)
 
-The image shows navigation on a historical `user` bubble. Current relay messages use the same visible-card and sender-navigation experience while retaining plugin `relay` provenance instead of impersonating human input. The full session id remains in typed source metadata and in a Host-generated model-visible protocol header, so the receiving Agent never has to guess the sender.
+Current relay messages are displayed as visible Agent message cards; clicking the header opens the sender session. The persisted source remains plugin `relay` provenance rather than impersonating human input. The full session id remains in typed source metadata and in a Host-generated model-visible protocol header, so the receiving Agent never has to guess the sender.
 
 ### Delivery modes (the `mode` parameter of `send_agent_message`)
 
@@ -78,8 +78,8 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 ## Usage
 
 1. Type `@` at the beginning of session A's composer and choose the target from the native candidate menu; each candidate shows its title and `Running`/`Idle` activity;
-2. `@` only tells A where the relevant session is; it does not mean send. A calls `send_agent_message` when either the current request or an orchestration responsibility already granted by the user requires cross-session communication, and makes that routing decision silently. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` only reads B on demand without explaining the internal routing decision;
-3. For an explicit forwarding request, A only delivers and reports the result. It must not execute the forwarded task itself or ask B for an extra acknowledgement. B sends a business result to `senderSessionId` only when the body explicitly asks for one;
+2. `@` only tells A where the relevant session is; it does not mean send. A calls `send_agent_message` only when the current request or an orchestration responsibility already granted by the user requires cross-session communication. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` must not send a message to B;
+3. For an explicit forwarding request, A only delivers and reports whether the message was accepted or failed. It must not execute the forwarded task itself or ask B for an extra acknowledgement. B sends a message to `senderSessionId` only when the body explicitly asks it to return business content;
 4. You can still ask the Agent to call `list_peer_agents` and send directly with a full session id;
 5. Session B receives a native `UserMessage` with a typed relay source plus a minimal Host-generated source header on the first body line, so B does not have to guess the sender. The Client presents it as a visible Agent message card whose header opens the sender session;
 6. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
@@ -103,9 +103,11 @@ After `send_agent_message` submits the native message to the target Inbox, it im
 
 Every cross-session message is created by Harness `createUserMessage()`, and `UserMessage.id` is its only message identity. Its source always uses `kind: dsh-agent-message` and `form: relay`, plus the protocol version, sender/target Session ids, and display title. Because current Harness model requests do not expand custom source fields, the Host also writes a minimal `<dsh-agent-message>` header containing only `senderSessionId` on the first body line. The typed source is the durable/UI truth; the header is only the model-visible projection needed for reply addressing. The plugin registers no global system prompt; send admission lives only in the `send_agent_message` tool contract. The Client only projects relay as a visible Agent message card and never rewrites an Agent message as human `user` provenance.
 
-The current release has no separate result protocol: relay only means “a message addressed by another session”; it neither requires nor forbids a reply. When the body explicitly requests a business result, the receiving Agent may send it to `senderSessionId` with the same tool. Otherwise it must not send a transport acknowledgement or a bare “received.” A correlated Result protocol should be added only when machine-verifiable request/result linkage is required.
+Relay only means “a message addressed by another session”; it neither requires nor forbids a reply. When the body explicitly requests business content in return, the receiving Agent may send a message to `senderSessionId` with the same tool. Otherwise it must not send a transport acknowledgement or a bare “received.” The plugin does not automatically correlate requests and replies or forward ordinary Agent answers.
 
 The composer-side `@` session locator reuses Harness's native `inputTriggers` command marker. The visible selected title is capped at 40 Unicode characters with an ellipsis; submission replaces it with the full stable `@session-...` id for the current Agent. The sent bubble still projects that id with a chat icon and the live session title, so renaming a session does not change the locator target.
+
+See [`docs/architecture-v2.md`](./docs/architecture-v2.md) for the current architecture contract.
 
 ## Directory structure
 
@@ -116,14 +118,10 @@ dsh-agent-message/
 │   └── client.js       # client half: @session references, session navigation and copy-session-id button
 ├── cordis.patch.yml    # self-registration patch (pointed to by dsh.bundle.patch)
 ├── package.json        # DSH plugin manifest (dsh.bundle / dsh.client / dshx.contributes)
-├── docs/               # design notes and README example screenshot
+├── docs/               # current architecture and README example screenshot
 ├── README.md           # Chinese documentation
 └── README.en.md        # English documentation
 ```
-
-## In Development
-
-- **Cross-process communication:** Allow Agent sessions running in different DSH processes to exchange messages.
 
 ## Limitations
 

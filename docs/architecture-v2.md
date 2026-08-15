@@ -1,6 +1,6 @@
 # dsh-agent-message 架构设计 v2
 
-> 状态：已修订，作为后续实现裁决源
+> 状态：现役架构与实现合同
 >
 > 初稿：2026-08-14
 >
@@ -22,7 +22,7 @@
 6. 普通消息默认 `followup`；`steer` 和 `inject` 只在用户或已授权编排明确选择时使用；
 7. 一次通信不得归档、卸载、隐藏或以其他方式改变目标 Session 的产品属性；
 8. 回执只证明传输事实，不证明目标任务已完成；
-9. 当前不设计 Result 协议、自动回复链、广播或跨进程传输。
+9. 当前不设计自动请求/回复关联、自动回复链、广播或跨进程传输。
 
 这份架构优先服从 Harness 的公开对象和生命周期。无法通过公开 seam 稳定实现的能力，不进入当前核心合同。
 
@@ -47,10 +47,10 @@
 - 不根据 Agent 的 `idle/running` 猜测某项业务是否完成；
 - 不要求 B 返回“收到”等传输确认；
 - 不自动把 B 的普通回答转发回 A；
-- 不建立 request/result 状态机、reply policy 或自动关联；
+- 不建立请求/回复状态机或自动关联；
 - 不实现跨进程、跨机器、广播、共享任务表或独立 mailbox。
 
-按需读取属于 Harness Session Reference 或未来独立只读能力，不属于本通信插件的 Owner 范围。`@` 可以帮助 A 定位 B，但是否读取、如何读取由 A 使用正式只读能力决定。
+读取不属于本通信插件的 Owner 范围。`@` 只帮助 A 定位 B；若宿主提供 Session Reference 或其他只读工具，是否读取、如何读取由 A 使用该正式能力决定。
 
 ## 3. 稳定对象与 Owner
 
@@ -108,10 +108,11 @@ Client 不决定发送，不选择投递模式，不制造传输状态，也不�
 A 根据用户完整句子判断动作：
 
 - “分析 B 的最近讨论”是读取意图，不是发送；
-- “打开 B”是导航意图，不是发送；
 - “告诉 B 完成后提交 draft PR”是发送意图；
 - “立即纠正 B 当前的错误”是发送并选择 `steer`；
 - “不打断 B，补充这份背景”是发送并选择 `inject`。
+
+导航由用户点击 Client 中的会话引用或消息来源完成，不通过消息工具实现。
 
 工具描述只需告诉模型：当当前请求，或用户已经授予的编排职责，明确要求向其他 Agent 或 Session 传递信息时调用。无需加入全局、持续干扰每轮推理的复杂判断提示词。
 
@@ -148,7 +149,7 @@ Harness 是以下事实的唯一 Owner：
 | 示例 | 语义 | 是否发送消息 |
 |---|---|---|
 | `@B 帮我分析他最新的对话结果` | 定位后读取/分析 | 否 |
-| `@B 打开` | 定位后导航 | 否 |
+| 点击输入气泡或消息头中的 `@B` | Client 导航 | 否 |
 | `@B 告诉他最后提交 PR draft 就停止` | 定向发送新任务 | 是，默认 followup |
 | `@B 立即纠正当前错误` | 介入运行中的任务 | 是，steer |
 | `@B 把这份资料补充给他，不要打断` | 补充运行中上下文 | 是，inject |
@@ -194,7 +195,7 @@ Relay 使用 Harness 原生 `UserMessage`：
 <dsh-agent-message>{"senderSessionId":"session-a"}</dsh-agent-message>
 ```
 
-不把 `messageId`、`targetSessionId`、reply policy、业务状态机等信息塞进模型上下文。typed source 仍是 Host/UI 的权威事实；正文首行只是当前 Harness 能力下的兼容投影。
+不把 `messageId`、`targetSessionId`、自动回复标记或业务状态机等信息塞进模型上下文。typed source 仍是 Host/UI 的权威事实；正文首行只是当前 Harness 能力下的兼容投影。
 
 ## 7. 三种投递模式
 
@@ -240,17 +241,13 @@ stateDiagram-v2
 5. 目标完成后保持 Harness 中正常的 idle loaded 状态；
 6. 后续消息优先通过 `agents.get(sessionId)` 复用它。
 
-### 8.2 关键纠正
-
-旧设计要求目标一回到 idle 就调用 `AgentHandle.dispose()`。该做法错误：官方 `dispose()` 不只是停止循环，还会注销 Agent 并从当前 store 移除 Session。实际结果是目标回复后从侧边栏和 `@` 列表消失，虽然持久日志仍然存在。
-
-因此固定以下不变量：
+### 8.2 生命周期约束
 
 - **不得因为一次消息完成就在 idle 时 dispose；**
 - 插件恢复的 handle 在正常运行期间保留并复用；
 - handle 的最终清理绑定插件/Harness 生命周期，而不是某条消息生命周期；
-- 当前 Harness 缺少“释放插件持有权但保留 Session store 投影”的公开 seam，这是上游生命周期缺口；
-- 在该 seam 出现前，正常通信优先保证 Session 可见性与 Harness 一致，不能用会让会话消失的清理策略换取局部资源回收。
+- Harness `agents` Registry 始终是运行态真相源；并发恢复时复用已存在的 Agent，收到 `agent/disposed` 时淘汰旧 handle；
+- 正常通信必须保持 Session 在侧边栏、`@` 列表和 Harness store 中可见。
 
 插件不得归档、取消归档、改标题或删除目标 Session。一次消息只改变目标 Inbox 和正常运行状态。
 
@@ -264,7 +261,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 - transport ack、`claimed` 或 B 变为 idle 都不算业务回答；
 - Agent 间消息不能提升权限，提交、推送、删除等动作仍需目标 Session 原有授权。
 
-当前不实现自动 request/result 关联。只有出现真实、可验证的机器工作流，需要“一条请求对应一个终止结果”时，才单独设计 Result；不能提前把普通对话复杂化。
+插件不自动关联请求与回复，也不自动转发 B 的普通回答。需要返回内容时，由消息正文明确要求 B 使用同一个工具向 `senderSessionId` 发送普通 relay。
 
 ## 10. 传输诊断
 
@@ -312,43 +309,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
-## 13. 当前实现需要收口的差距
-
-按优先级实施：
-
-### P0：修正 Session 生命周期（已完成）
-
-- 删除 cold send 完成后 `whenIdle() -> dispose()`；
-- 为插件恢复的 handle 建立按 Session ID 复用的生命周期管理；
-- Handle 缓存只做并发去重，Harness `agents` Registry 始终是真相源；目标被并发激活时复用现有 Agent，收到 `agent/disposed` 时淘汰旧 Handle；
-- 增加回归：cold Session 回复后仍出现在侧边栏、`@` 列表和 `agents.get()`；
-- 验证重启后 persisted Session 仍可查询并再次恢复。
-
-### P1：落实模式准入（已完成）
-
-- 默认 `followup`；
-- `steer/inject` 在 Host 边界要求目标 running；
-- 不自动切换或降级模式；
-- 覆盖 running、idle、offline 三种状态。
-
-### P2：缩小模型干扰（已完成）
-
-- 将发送条件收敛到工具描述；
-- 删除全局 system prompt，发送准入只保留在工具合同中；
-- 将模型可见来源头缩到回复必需的 `senderSessionId`；
-- 保持 typed source 的完整 Host/UI 元数据。
-
-### P3：固定 UI 兼容测试（已完成）
-
-- 覆盖 `@` 列表、输入框 token、发送气泡和来源跳转；
-- 明确 DOM 兼容选择器的失效行为；
-- 不让 UI 是否美化影响消息正确性。
-
-自动化兼容哨兵位于 `test/client-source.test.js`，固定会话过滤、稳定 ID 提交、候选状态、relay 卡片和鼠标/键盘跳转合同。2026-08-15 已在本地 Harness 依次验收 `@` 候选、输入框引用、relay 卡片与发送方跳转，且未发送测试消息。Harness DOM 选择器失配时只失去 Client 显示增强；Host 投递、typed source、稳定 Session ID 和权限校验不受影响。
-
-Result、自动回复编排和跨进程都不进入以上阶段。等同进程基础语义稳定并出现真实需求后，再分别立项。
-
-## 14. 验收不变量
+## 13. 验收不变量
 
 1. 完整 `SessionId` 是唯一地址，标题变化不改变目标；
 2. 普通 fork 不因存在 `parentSession` 被排除；
@@ -367,30 +328,11 @@ Result、自动回复编排和跨进程都不进入以上阶段。等同进程�
 15. cold Session 完成后保持正常可见，不因 idle dispose 从侧边栏或 `@` 消失；
 16. 插件不修改归档、标题、血缘和其他 Session 产品属性；
 17. Client DOM 美化失效时，消息投递、来源和权限仍然正确；
-18. 当前没有第二份 Inbox、spool、Result 状态机或跨进程 transport。
+18. 当前没有第二份 Inbox、spool、自动回复状态机或跨进程 transport。
 
-## 15. 决策记录
-
-### 2026-08-15：纠正 idle dispose
-
-实测 Session `session-1b3eaab8-ae3e-4b7d-8b32-a084df29bd88` 回复后从侧边栏和 `@` 列表消失，但持久记录仍存在且未归档。结合 Harness `AgentHandle.dispose()` 的公开语义，确认根因是插件在 `whenIdle()` 后 dispose，导致当前 store 投影被移除。
-
-裁决：消息生命周期与 AgentHandle 生命周期解耦；正常通信结束不释放目标 handle。
-
-### 2026-08-15：保留三种模式
-
-`followup`、`steer`、`inject` 都是 Harness 的真实调度能力，用户和编排 Agent 均有明确使用场景。架构不删除能力，只限制模式语义和 Host 准入。
-
-### 2026-08-15：删除超前协议
-
-现阶段普通 relay 已能满足单次 Session 通信。Result、reply policy、自动关联和跨进程协议没有稳定需求与公开 seam 支撑，暂不进入核心架构。
-
-## 16. 证据与参考
+## 14. 证据与参考
 
 - 当前实现：[`lib/index.js`](../lib/index.js)、[`lib/client.js`](../lib/client.js)。
-- `@` 与回复所有权调研：[`session-mention-routing-research-2026-08-14.md`](./session-mention-routing-research-2026-08-14.md)。
-- Harness 源码证据：[`architecture-evidence-2026-08-14.md`](./architecture-evidence-2026-08-14.md)。
-- 官方发展方向审计：[`harness-development-direction-audit-2026-08-14.md`](./harness-development-direction-audit-2026-08-14.md)。
 - [DeepSeek Harness 开发手册](https://deepseek-harness.github.io/deepseek-harness/develop/basic/)。
 - [DeepSeek Harness Session Reference](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session-reference)。
 - [Codex App Server](https://developers.openai.com/codex/app-server)：读取、inject、turn start 与 steer 分离。
