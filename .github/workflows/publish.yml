@@ -1,0 +1,54 @@
+name: Publish npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出 Release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: 确认 Release 来自主分支
+        run: git merge-base --is-ancestor HEAD origin/main
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: 校验版本
+        run: test "v$(node -p "require('./package.json').version")" = "${{ github.event.release.tag_name }}"
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 检查语法
+        run: |
+          node --check lib/index.js
+          node --check lib/client.js
+
+      - name: 测试及发布包校验
+        run: pnpm test
+
+      - name: 发布到 npm
+        run: npm publish
