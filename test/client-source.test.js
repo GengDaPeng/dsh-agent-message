@@ -49,3 +49,17 @@ test('会话引用和 relay 来源支持鼠标及键盘打开完整 Session ID',
   assert.match(source, /document\.addEventListener\("click", openSender\)/)
   assert.match(source, /document\.removeEventListener\("click", openSender\)/)
 })
+
+test('Client 文案跟随界面语言且卸载后可恢复原生发送方标签', () => {
+  assert.match(source, /uiText\("来自会话 · ", "From Session · "\)/)
+  assert.match(source, /uiText\("打开发送方会话", "Open sender session"\)/)
+  assert.match(source, /uiText\("复制会话 ID", "Copy session ID"\)/)
+  assert.doesNotMatch(source, /label\.textContent = ""/)
+})
+
+test('移除 DOM 子树时只查询其中的插件节点，不遍历全部已跟踪元素', () => {
+  const cleanup = source.slice(source.indexOf('function cleanupRoots'), source.indexOf('function SessionActivity'))
+  assert.match(cleanup, /querySelectorAll\(reactRootSelector\)/)
+  assert.match(cleanup, /querySelectorAll\("\.agent-msg-session-link"\)/)
+  assert.doesNotMatch(cleanup, /mountedRoots\.forEach|sessionLinks\.forEach/)
+})
