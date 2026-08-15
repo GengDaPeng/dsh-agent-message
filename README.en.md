@@ -22,18 +22,18 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 
 | Capability | Description |
 |---|---|
-| `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
+| `list_peer_agents` | List all **sendable independent sessions**: non-archived, excluding actual subagents while retaining ordinary forks; returns id, title, working directory, and runtime status |
 | `send_agent_message` | Send a message to a session id; `followup` creates an independent turn by default and offline targets are resumed automatically; explicit modes are `followup`, `inject`, and `steer` |
-| `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown); explicit message ids remain queryable after restart, with target runtime status reported separately; silent by default |
+| `check_delivery` | Query receipts on demand (pending/claimed/discarded/unknown); a successful send first returns accepted, while pre-admission failure is a tool error; explicit message ids remain queryable after restart |
 | `@` session locator | Type `@` at the beginning of the composer and choose a target; candidates show only the session title and `Running`/`Idle`, excluding blank placeholders and subagents. The user sees a readable title while the current Agent receives the stable session id; `@` only locates the session, and the full-sentence intent determines whether to send, read, or analyze |
-| Navigable sender header | Both the `From Session · <name>:` line in `user` bubbles and the `From session @<ID>` source line in relay contexts can open the sender session by click or keyboard |
+| Visible Agent message card | Relay keeps its true plugin provenance while the Client presents it as a left-aligned Agent message card; `From Session · <name>:` opens the sender by click or keyboard |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
 ### Sender navigation example
 
 ![Clickable sender header example](./docs/assets/message-header-navigation.jpg)
 
-Users see only the sending Agent's name and can open its session by clicking the whole line. The full session id remains available to the receiving Agent in the raw message and metadata for precise identification and replies.
+The image shows navigation on a historical `user` bubble. Current relay messages use the same visible-card and sender-navigation experience while retaining plugin `relay` provenance instead of impersonating human input. The full session id remains in typed source metadata and in a Host-generated model-visible protocol header, so the receiving Agent never has to guess the sender.
 
 ### Delivery modes (the `mode` parameter of `send_agent_message`)
 
@@ -41,27 +41,10 @@ Users see only the sending Agent's name and can open its session by clicking the
 |---|---|
 | (default, omitted) | `followup`: create an independent turn; an offline target is resumed automatically before delivery |
 | `followup` | Same as the default; queue directly when online, or resume and queue when offline |
-| `steer` | Steer the target's current work (online only) |
-| `inject` | Silently inject the next step without waking it up (online only) |
+| `steer` | Intervene in the target's current work immediately (`running` sessions only) |
+| `inject` | Add next-step context without interrupting the current goal (`running` sessions only) |
 
-**Archived sessions are always rejected** (you are prompted to unarchive first); sending to yourself is also rejected.
-
-### Configuring the message form (`form`)
-
-The two forms differ not only visually — they carry different **intents**:
-
-| form | Rendering | Intent |
-|---|---|---|
-| `user` (default) | Ordinary message bubble | **Conversational**: like a human chat, a reply is expected |
-| `relay` | Collapsible context block | **Directive**: injected as context that quietly shapes the agent's later behavior — for instruction-style messages where no reply is expected |
-
-Override the plugin entry in your profile's `cordis.patch.yml` (takes effect on hot reload, no restart needed):
-
-```yaml
-- id: agent-message
-  config:
-    form: relay
-```
+**Archived sessions and actual subagents are always rejected**; ordinary forks remain independent and sendable. Sending to yourself is also rejected.
 
 ## Installation
 
@@ -95,10 +78,10 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 ## Usage
 
 1. Type `@` at the beginning of session A's composer and choose the target from the native candidate menu; each candidate shows its title and `Running`/`Idle` activity;
-2. `@` only tells A where the relevant session is. For example, `@B tell it to stop after opening the draft PR` makes A call `send_agent_message`, while `@B analyze its latest conversation result` makes A search/read B on demand without messaging B;
-3. For an explicit forwarding request, A only delivers and reports the result. It must not execute the forwarded task itself or ask B for an extra acknowledgement;
+2. `@` only tells A where the relevant session is; it does not mean send. A calls `send_agent_message` when either the current request or an orchestration responsibility already granted by the user requires cross-session communication, and makes that routing decision silently. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` only reads B on demand without explaining the internal routing decision;
+3. For an explicit forwarding request, A only delivers and reports the result. It must not execute the forwarded task itself or ask B for an extra acknowledgement. B sends a business result to `senderSessionId` only when the body explicitly asks for one;
 4. You can still ask the Agent to call `list_peer_agents` and send directly with a full session id;
-5. For `user` messages, click `From Session · <name>:` to open the sender; `relay` keeps Harness's context presentation and exposes the same navigation through its existing `From session @<ID>` source line;
+5. Session B receives a native `UserMessage` with a typed relay source plus a minimal Host-generated source header on the first body line, so B does not have to guess the sender. The Client presents it as a visible Agent message card whose header opens the sender session;
 6. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
 
 ## How it works
@@ -111,12 +94,16 @@ Each Agent has an inbox `Inbox` containing two FIFO queues:
 Delivery paths of `send_agent_message`:
 
 - **Ordinary online message**: find the target Agent through the `agents` registry and call `followup()` so it enters an independent `next-turn`;
-- **Explicit online semantics**: call `steer()` or `inject()` only when the mode is explicitly requested;
-- **Ordinary offline message**: restore the session through the public `agents.resume()` API, then call `followup()`. The plugin owns the returned handle and releases it when the Agent becomes idle or the plugin unloads. Resume failures are returned directly; the plugin does not forge core Inbox events as a fallback note.
+- **Running-mode semantics**: users do not need to name a mode. The Agent selects `steer()` when the full request clearly asks for immediate intervention, or `inject()` when it clearly asks to add context without interrupting the current task. The target must actually be `running`; when intent is unclear, the Agent keeps the default `followup()`;
+- **Ordinary offline message**: first read and validate one logical-session snapshot through `sessionQuery.readSession()`, then restore it through the public `agents.resume()` API and call `followup()`. The plugin retains and reuses the returned handle, keeps the target loaded after it becomes idle, and releases the handle only when the plugin unloads. Resume failures are returned directly; the plugin does not forge core Inbox events as a fallback note.
 
-Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message. When `messageId` is specified, `check_delivery` recovers the state directly from the target's existing Inbox log, so the lookup continues to work after a process restart.
+Session enumeration, batched titles, and offline log reads use Harness's `sessionQuery.listSessions()`, `readTitleSnapshots()`, and `readSession()` respectively. `SessionId` is the only address; `parentSession` records fork lineage only, and only `origin: subagent` identifies an actual subagent. The plugin does not scan `sessionPersistence` directly to rebuild a parallel session directory.
 
-For `user` messages, the raw body header contains the sender title and full session id while the UI shows only a navigable `From Session · <name>:` header. `relay` does not repeat that header in the body; its native Harness source line is shown as a navigable `From session @<ID>`. Both forms retain the sender title and plain `session-...` id in `source` metadata.
+After `send_agent_message` submits the native message to the target Inbox, it immediately returns `accepted` with the native `messageId`. `check_delivery` then derives `pending` (still queued), `claimed` (claimed by a turn), `discarded` (cancelled), or `unknown` from Inbox events. `claimed` is transport evidence only: it does not prove that the message was read, answered, or completed. Pre-admission failure remains a Harness tool error and writes nothing to the target Inbox. Runtime state is reported separately as `targetRuntimeStatus`, so unrelated Agent activity never changes the message state. A known `messageId` remains queryable from the target Inbox log after a process restart.
+
+Every cross-session message is created by Harness `createUserMessage()`, and `UserMessage.id` is its only message identity. Its source always uses `kind: dsh-agent-message` and `form: relay`, plus the protocol version, sender/target Session ids, and display title. Because current Harness model requests do not expand custom source fields, the Host also writes a minimal `<dsh-agent-message>` header containing only `senderSessionId` on the first body line. The typed source is the durable/UI truth; the header is only the model-visible projection needed for reply addressing. The plugin registers no global system prompt; send admission lives only in the `send_agent_message` tool contract. The Client only projects relay as a visible Agent message card and never rewrites an Agent message as human `user` provenance.
+
+The current release has no separate result protocol: relay only means “a message addressed by another session”; it neither requires nor forbids a reply. When the body explicitly requests a business result, the receiving Agent may send it to `senderSessionId` with the same tool. Otherwise it must not send a transport acknowledgement or a bare “received.” A correlated Result protocol should be added only when machine-verifiable request/result linkage is required.
 
 The composer-side `@` session locator reuses Harness's native `inputTriggers` command marker. The visible selected title is capped at 40 Unicode characters with an ellipsis; submission replaces it with the full stable `@session-...` id for the current Agent. The sent bubble still projects that id with a chat icon and the live session title, so renaming a session does not change the locator target.
 
@@ -136,7 +123,6 @@ dsh-agent-message/
 
 ## In Development
 
-- **`@` session lookup:** Find and select a target session with `@`, without manually retrieving or entering its session ID.
 - **Cross-process communication:** Allow Agent sessions running in different DSH processes to exchange messages.
 
 ## Limitations
