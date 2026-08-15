@@ -1,5 +1,7 @@
 # dsh-agent-message v1.2 设计稿
 
+> 历史设计：其中 `leave/wake`、手工追加核心 Inbox 事件和私有唤醒路径已被 [`architecture-v2.md`](./architecture-v2.md) 的阶段 A 裁决取代，不代表当前稳定合同。
+
 > 纵横设计（D2 · 评审稿）。评审通过后，结论落点为：`lib/index.js`（代码）、`README.md`（用户文档）、本文件（设计记录）。
 
 ## 0. 任务边界与证据状态

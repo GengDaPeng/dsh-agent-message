@@ -13,7 +13,7 @@ English | [中文](./README.md)
 In DeepSeek Harness, a single process hosts multiple Agent sessions at once. This plugin equips each session with three tools so they can "message" each other:
 
 - Before sending, first **list every sendable session** (all non-archived ones are listed, including offline ones that haven't been reopened), and find the target by its title;
-- Once found, **deliver the message to the target session** — if the target is online, its current work is steered immediately; if it is offline (not loaded since the last process restart), it is **activated automatically** and then messaged, falling back to a **note** (visible when it is next opened) if activation fails;
+- Once found, **deliver the message to the target session** — ordinary messages always enter a new independent turn; if the target is offline (not loaded since the last process restart), the plugin resumes it through Harness's public API, delivers the message, and releases the runtime after processing;
 - When needed, **query the delivery status of a message on demand** (queued / claimed / discarded / unknown), with the target runtime status reported separately for supervision scenarios.
 
 Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, two Agents collaborating in a relay, a main session sending instructions to a test session, or a supervisor Agent watching over several workers.
@@ -23,8 +23,9 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 | Capability | Description |
 |---|---|
 | `list_peer_agents` | List all **sendable (non-archived)** sessions: id, title, working directory, status (online/offline), kind (peer/subagent) |
-| `send_agent_message` | Send a message to a session id; **immediate delivery by default** (online → steer; offline → wake, falling back to leave), plus five explicit modes |
+| `send_agent_message` | Send a message to a session id; `followup` creates an independent turn by default and offline targets are resumed automatically; explicit modes are `followup`, `inject`, and `steer` |
 | `check_delivery` | Query receipts on demand (delivered/claimed/discarded/unknown); explicit message ids remain queryable after restart, with target runtime status reported separately; silent by default |
+| `@` session locator | Type `@` at the beginning of the composer and choose a target; candidates show only the session title and `Running`/`Idle`, excluding blank placeholders and subagents. The user sees a readable title while the current Agent receives the stable session id; `@` only locates the session, and the full-sentence intent determines whether to send, read, or analyze |
 | Navigable sender header | Both the `From Session · <name>:` line in `user` bubbles and the `From session @<ID>` source line in relay contexts can open the sender session by click or keyboard |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
 
@@ -38,12 +39,10 @@ Users see only the sending Agent's name and can open its session by clicking the
 
 | mode | Meaning |
 |---|---|
-| (default, omitted) | **Immediate delivery**: online → `steer`; offline → `wake` (falls back to `leave` if activation fails) |
+| (default, omitted) | `followup`: create an independent turn; an offline target is resumed automatically before delivery |
+| `followup` | Same as the default; queue directly when online, or resume and queue when offline |
 | `steer` | Steer the target's current work (online only) |
-| `followup` | Queue a new independent turn for the target (online only) |
 | `inject` | Silently inject the next step without waking it up (online only) |
-| `leave` | Leave a note: write into the target's inbox without waking it; for offline sessions this is a "mailbox" that appears when the session is next opened |
-| `wake` | Activate: resume an offline session first, then deliver; equivalent to `followup` when online |
 
 **Archived sessions are always rejected** (you are prompted to unarchive first); sending to yourself is also rejected.
 
@@ -95,11 +94,12 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 
 ## Usage
 
-1. Tell session A "list the sendable Agents" — it calls `list_peer_agents`;
-2. Note down the target session's `id` (or have the other side click the "Copy ID" button);
-3. Say "send a message to `<session id>`: ..." — it calls `send_agent_message`; online targets are messaged immediately, offline targets are activated automatically (or left a note on failure);
-4. For `user` messages, click `From Session · <name>:` to open the sender; `relay` keeps Harness's context presentation and exposes the same navigation through its existing `From session @<ID>` source line.
-5. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
+1. Type `@` at the beginning of session A's composer and choose the target from the native candidate menu; each candidate shows its title and `Running`/`Idle` activity;
+2. `@` only tells A where the relevant session is. For example, `@B tell it to stop after opening the draft PR` makes A call `send_agent_message`, while `@B analyze its latest conversation result` makes A search/read B on demand without messaging B;
+3. For an explicit forwarding request, A only delivers and reports the result. It must not execute the forwarded task itself or ask B for an extra acknowledgement;
+4. You can still ask the Agent to call `list_peer_agents` and send directly with a full session id;
+5. For `user` messages, click `From Session · <name>:` to open the sender; `relay` keeps Harness's context presentation and exposes the same navigation through its existing `From session @<ID>` source line;
+6. (Supervision) Say "check the status of my messages to `<session id>`" — it calls `check_delivery`.
 
 ## How it works
 
@@ -110,13 +110,15 @@ Each Agent has an inbox `Inbox` containing two FIFO queues:
 
 Delivery paths of `send_agent_message`:
 
-- **Online**: find the target Agent through the `agents` registry and write into its inbox via `steer()` / `followup()` / `inject()`;
-- **Offline note (`leave`)**: append an `agent/inbox/spliced` event **durably** to the target session's log — when the session is next resumed, its inbox replays the event and the message is there (and the plugin wakes it so the note appears right away);
-- **Offline activation (`wake`)**: `agents.resume()` restores the session (together with its recorded agent preset), then `followup()` — the session is woken and processes the message immediately.
+- **Ordinary online message**: find the target Agent through the `agents` registry and call `followup()` so it enters an independent `next-turn`;
+- **Explicit online semantics**: call `steer()` or `inject()` only when the mode is explicitly requested;
+- **Ordinary offline message**: restore the session through the public `agents.resume()` API, then call `followup()`. The plugin owns the returned handle and releases it when the Agent becomes idle or the plugin unloads. Resume failures are returned directly; the plugin does not forge core Inbox events as a fallback note.
 
 Receipt states come from inbox events: still queued is `delivered`, claimed by one of the target's turns is `claimed`, and cancelled is `discarded`. The target's runtime state is returned separately as `targetStatus`, so an Agent running unrelated work is not presented as processing this message. When `messageId` is specified, `check_delivery` recovers the state directly from the target's existing Inbox log, so the lookup continues to work after a process restart.
 
 For `user` messages, the raw body header contains the sender title and full session id while the UI shows only a navigable `From Session · <name>:` header. `relay` does not repeat that header in the body; its native Harness source line is shown as a navigable `From session @<ID>`. Both forms retain the sender title and plain `session-...` id in `source` metadata.
+
+The composer-side `@` session locator reuses Harness's native `inputTriggers` command marker. The visible selected title is capped at 40 Unicode characters with an ellipsis; submission replaces it with the full stable `@session-...` id for the current Agent. The sent bubble still projects that id with a chat icon and the live session title, so renaming a session does not change the locator target.
 
 ## Directory structure
 
@@ -124,7 +126,7 @@ For `user` messages, the raw body header contains the sender title and full sess
 dsh-agent-message/
 ├── lib/
 │   ├── index.js        # host half: list_peer_agents / send_agent_message / check_delivery
-│   └── client.js       # client half: sender-session navigation and copy-session-id button
+│   └── client.js       # client half: @session references, session navigation and copy-session-id button
 ├── cordis.patch.yml    # self-registration patch (pointed to by dsh.bundle.patch)
 ├── package.json        # DSH plugin manifest (dsh.bundle / dsh.client / dshx.contributes)
 ├── docs/               # design notes and README example screenshot
@@ -140,7 +142,7 @@ dsh-agent-message/
 ## Limitations
 
 - The target session must be **non-archived** and present in local persistence; archived sessions are always rejected.
-- Offline activation (`wake`) resumes the target with the **default model** (it does not inherit a model manually selected earlier in that session).
+- Automatically resuming an offline session uses the **default model** (it does not inherit a model manually selected earlier in that session); if resume fails, the message is not written to the target Inbox.
 - Bulk receipt queries without `messageId` rely on in-memory bookkeeping and cover only the most recent 1000 sends in the current process (FIFO eviction). After a restart, a known `messageId` remains queryable, but the volatile `sentAt` and `mode` fields are no longer returned.
 - Cross-process / cross-machine communication is out of scope.
 
