@@ -20,7 +20,7 @@ function liveAgent(id, title = id) {
     followup(message) { nextTurn.push(message); this.wakeCount += 1 },
     steer(message) { nextStep.push(message); this.wakeCount += 1 },
     inject(message) { nextStep.push(message) },
-    wakeDriver() { this.wakeCount += 1 },
+    whenIdle() { return Promise.resolve() },
     title,
   }
 }
@@ -29,6 +29,7 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
   const agentMap = new Map(initialAgents.map((agent) => [String(agent.id), agent]))
   const tools = new Map()
   const listeners = new Map()
+  const effects = []
   const ctx = {
     agents: {
       get: (id) => agentMap.get(String(id)),
@@ -41,25 +42,119 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
       if (name === 'sessionTitle') return services.sessionTitle ?? { get: (session) => ({ title: session.agentTitle ?? '发送者' }) }
       return services[name]
     },
+    effect(factory) {
+      const cleanup = factory()
+      if (typeof cleanup !== 'function') return cleanup
+      let active = true
+      const dispose = async () => {
+        if (!active) return
+        active = false
+        await cleanup()
+      }
+      effects.push(dispose)
+      return dispose
+    },
     on: (name, listener) => listeners.set(name, listener),
   }
   apply(ctx, config)
-  return { tools, listeners, agentMap }
+  return {
+    tools,
+    listeners,
+    agentMap,
+    async dispose() {
+      for (const effect of effects.reverse()) await effect()
+    },
+  }
 }
 
-test('leave 给在线会话排队但不唤醒', async () => {
-  const sender = liveAgent('sender')
-  sender.session.agentTitle = '发送者'
-  const target = liveAgent('target')
+test('@会话引用提示只提供稳定定位并由整句意图决定动作', () => {
+  let section
+  setup({
+    services: {
+      systemPrompt: {
+        section(value) {
+          section = value
+          return () => {}
+        },
+      },
+    },
+  })
+
+  assert.equal(section.name, 'plugin:dsh-agent-message')
+  assert.match(section.text, /@session-\.\.\./)
+  assert.match(section.text, /send_agent_message/)
+  assert.match(section.text, /完整 session ID/)
+  assert.match(section.text, /定位符/)
+  assert.match(section.text, /搜索\/读取/)
+  assert.match(section.text, /不要仅凭 @ 自动发送/)
+  assert.match(section.text, /不要代为执行/)
+})
+
+test('默认发送给在线会话进入独立下一 turn', async () => {
+  const sender = liveAgent('session-sender')
+  const target = liveAgent('session-target')
   const { tools } = setup({ agents: [sender, target] })
 
-  await tools.get('send_agent_message').execute(
-    { to: 'target', content: '稍后处理', mode: 'leave' },
+  const result = await tools.get('send_agent_message').execute(
+    { to: 'session-target', content: '新请求' },
     { agent: sender },
   )
 
+  assert.equal(result.mode, 'followup')
   assert.equal(target.inbox.nextTurn.length, 1)
-  assert.equal(target.wakeCount, 0)
+  assert.equal(target.inbox.nextStep.length, 0)
+})
+
+test('发送工具不再暴露 leave/wake 模式', async () => {
+  const sender = liveAgent('sender')
+  const target = liveAgent('target')
+  const { tools } = setup({ agents: [sender, target] })
+  const send = tools.get('send_agent_message')
+
+  assert.deepEqual(send.parameters.properties.mode.enum, ['followup', 'inject', 'steer'])
+  await assert.rejects(send.execute(
+    { to: 'target', content: '稍后处理', mode: 'leave' },
+    { agent: sender },
+  ), /must be one of/)
+})
+
+test('inject 和 steer 仅按显式模式进入在线会话的 next-step', async () => {
+  const sender = liveAgent('session-sender')
+  const injectTarget = liveAgent('session-inject')
+  const steerTarget = liveAgent('session-steer')
+  const { tools } = setup({ agents: [sender, injectTarget, steerTarget] })
+  const send = tools.get('send_agent_message')
+
+  await send.execute({ to: 'session-inject', content: '安静背景', mode: 'inject' }, { agent: sender })
+  await send.execute({ to: 'session-steer', content: '立即纠正', mode: 'steer' }, { agent: sender })
+
+  assert.equal(injectTarget.inbox.nextStep.length, 1)
+  assert.equal(injectTarget.wakeCount, 0)
+  assert.equal(steerTarget.inbox.nextStep.length, 1)
+  assert.equal(steerTarget.wakeCount, 1)
+})
+
+test('离线会话拒绝 inject 和 steer 且不会被恢复', async () => {
+  const sender = liveAgent('session-sender')
+  let resumes = 0
+  const { tools } = setup({
+    agents: [sender],
+    services: {
+      sessionPersistence: { list: async () => [{ id: 'session-target' }] },
+      resumeAgent: async () => { resumes += 1 },
+    },
+  })
+  const send = tools.get('send_agent_message')
+
+  await assert.rejects(
+    send.execute({ to: 'session-target', content: '安静背景', mode: 'inject' }, { agent: sender }),
+    /inject 仅用于在线会话/,
+  )
+  await assert.rejects(
+    send.execute({ to: 'session-target', content: '立即纠正', mode: 'steer' }, { agent: sender }),
+    /steer 仅用于在线会话/,
+  )
+  assert.equal(resumes, 0)
 })
 
 test('接收消息头包含可用于回复的稳定发送者会话 ID', async () => {
@@ -73,8 +168,8 @@ test('接收消息头包含可用于回复的稳定发送者会话 ID', async ()
     { agent: sender },
   )
 
-  assert.match(target.inbox.nextStep[0].content[0].text, /^From Session · 发送者: @session-sender\n请回复$/)
-  assert.deepEqual(target.inbox.nextStep[0].source, {
+  assert.match(target.inbox.nextTurn[0].content[0].text, /^From Session · 发送者: @session-sender\n请回复$/)
+  assert.deepEqual(target.inbox.nextTurn[0].source, {
     kind: 'user',
     plugin: 'dsh-agent-message',
     form: 'user',
@@ -94,8 +189,8 @@ test('relay 与 user 共用完整发送者来源字段', async () => {
     { agent: sender },
   )
 
-  assert.equal(target.inbox.nextStep[0].content[0].text, '上下文消息')
-  assert.deepEqual(target.inbox.nextStep[0].source, {
+  assert.equal(target.inbox.nextTurn[0].content[0].text, '上下文消息')
+  assert.deepEqual(target.inbox.nextTurn[0].source, {
     kind: 'plugin',
     plugin: 'dsh-agent-message',
     form: 'relay',
@@ -141,51 +236,23 @@ test('会话列表合并在线与离线记录并过滤归档', async () => {
   ])
 })
 
-test('会话恢复只唤醒本插件排队的消息', () => {
-  const otherPending = liveAgent('session-other')
-  otherPending.inbox.nextStep.push({ id: 'other', source: { kind: 'plugin', plugin: 'other-plugin' } })
+test('会话恢复不会通过私有驱动唤醒历史留言', () => {
   const pluginPending = liveAgent('session-plugin')
   pluginPending.inbox.nextTurn.push({ id: 'ours', source: { kind: 'user', plugin: 'dsh-agent-message' } })
   const { listeners } = setup()
   const onSessionStart = listeners.get('agent/session-start')
 
-  onSessionStart({ agent: otherPending })
-  onSessionStart({ agent: pluginPending })
+  onSessionStart?.({ agent: pluginPending })
 
-  assert.equal(otherPending.wakeCount, 0)
-  assert.equal(pluginPending.wakeCount, 1)
+  assert.equal(pluginPending.wakeCount, 0)
 })
 
-test('离线留言遇到序号竞争时重新读取并重试一次', async () => {
-  const sender = liveAgent('session-sender')
-  let reads = 0
-  let appends = 0
-  const persistence = {
-    list: async () => [{ id: 'session-target' }],
-    readFrom: async () => {
-      reads += 1
-      return { meta: { seedLength: 0 }, events: [] }
-    },
-    append: async () => {
-      appends += 1
-      if (appends === 1) throw new Error('append seq mismatch for "session-target"')
-    },
-  }
-  const { tools } = setup({ agents: [sender], services: { sessionPersistence: persistence } })
-
-  const result = await tools.get('send_agent_message').execute(
-    { to: 'session-target', content: '并发留言', mode: 'leave' },
-    { agent: sender },
-  )
-
-  assert.equal(result.ok, true)
-  assert.equal(reads, 2)
-  assert.equal(appends, 2)
-})
-
-test('默认发送会恢复离线会话并立即投递', async () => {
+test('默认发送会恢复离线会话并在空闲后释放 handle', async () => {
   const sender = liveAgent('session-sender')
   const resumed = liveAgent('session-target')
+  const idle = Promise.withResolvers()
+  resumed.whenIdle = () => idle.promise
+  let disposals = 0
   const persistence = {
     list: async () => [{ id: 'session-target' }],
     inspect: async () => ({ meta: {}, events: [] }),
@@ -196,7 +263,7 @@ test('默认发送会恢复离线会话并立即投递', async () => {
       sessionPersistence: persistence,
       resumeAgent: async (options) => {
         assert.equal(options.resumeSessionId, 'session-target')
-        return { agent: resumed }
+        return { agent: resumed, dispose: async () => { disposals += 1 } }
       },
     },
   })
@@ -206,19 +273,57 @@ test('默认发送会恢复离线会话并立即投递', async () => {
     { agent: sender },
   )
 
-  assert.equal(result.mode, 'wake')
+  assert.equal(result.mode, 'followup')
   assert.equal(resumed.inbox.nextTurn.length, 1)
   assert.equal(resumed.wakeCount, 1)
+  assert.equal(disposals, 0)
+
+  idle.resolve()
+  await idle.promise
+  await Promise.resolve()
+  assert.equal(disposals, 1)
 })
 
-test('离线恢复失败时降级为留言并如实返回原因', async () => {
+test('插件卸载会释放尚未空闲的恢复 handle', async () => {
   const sender = liveAgent('session-sender')
-  let appended
+  const resumed = liveAgent('session-target')
+  const idle = Promise.withResolvers()
+  resumed.whenIdle = () => idle.promise
+  let disposals = 0
+  const harness = setup({
+    agents: [sender],
+    services: {
+      sessionPersistence: {
+        list: async () => [{ id: 'session-target' }],
+        inspect: async () => ({ meta: {}, events: [] }),
+      },
+      resumeAgent: async () => ({
+        agent: resumed,
+        dispose: async () => { disposals += 1 },
+      }),
+    },
+  })
+
+  await harness.tools.get('send_agent_message').execute(
+    { to: 'session-target', content: '待完成请求' },
+    { agent: sender },
+  )
+  await harness.dispose()
+
+  assert.equal(disposals, 1)
+  idle.resolve()
+  await idle.promise
+  await Promise.resolve()
+  assert.equal(disposals, 1)
+})
+
+test('离线恢复失败时返回失败且不伪造 Inbox 留言', async () => {
+  const sender = liveAgent('session-sender')
+  let appends = 0
   const persistence = {
     list: async () => [{ id: 'session-target' }],
     inspect: async () => ({ meta: {}, events: [] }),
-    readFrom: async () => ({ meta: { seedLength: 0 }, events: [] }),
-    append: async (_id, events) => { appended = events[0] },
+    append: async () => { appends += 1 },
   }
   const { tools } = setup({
     agents: [sender],
@@ -228,14 +333,12 @@ test('离线恢复失败时降级为留言并如实返回原因', async () => {
     },
   })
 
-  const result = await tools.get('send_agent_message').execute(
+  await assert.rejects(tools.get('send_agent_message').execute(
     { to: 'session-target', content: '失败后留言' },
     { agent: sender },
-  )
+  ), /模型不可用/)
 
-  assert.equal(result.mode, 'leave')
-  assert.match(result.fallback, /激活失败：模型不可用.*已改为留言/)
-  assert.equal(appended.data.target, 'next-turn')
+  assert.equal(appends, 0)
 })
 
 test('归档、未知和自身会话在发送边界被拒绝', async () => {
@@ -265,11 +368,11 @@ test('消息被认领后不因目标正在运行而夸大为 processing', async 
     { to: 'session-target', content: '回执测试' },
     { agent: sender },
   )
-  const message = target.inbox.nextStep.shift()
+  const message = target.inbox.nextTurn.shift()
   target.status = 'running'
   target.session.events = [
-    { type: 'agent/inbox/spliced', data: { target: 'next-step', start: 0, inserted: [message] } },
-    { type: 'agent/inbox/spliced', data: { target: 'next-step', start: 0, removedCount: 1, inserted: [] } },
+    { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [message] } },
+    { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } },
   ]
 
   const result = await tools.get('check_delivery').execute({
@@ -337,7 +440,7 @@ test('批量查询同一离线会话的回执只读取一次日志', async () =>
         events: [{
           seq: 0,
           type: 'agent/inbox/spliced',
-          data: { target: 'next-step', start: 0, inserted: target.inbox.nextStep },
+          data: { target: 'next-turn', start: 0, inserted: target.inbox.nextTurn },
         }],
       }
     },
