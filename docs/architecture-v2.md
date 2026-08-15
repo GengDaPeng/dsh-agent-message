@@ -121,7 +121,7 @@ A 根据用户完整句子判断动作：
 Host 负责：
 
 1. 从工具执行上下文派生真实 `senderSessionId`；
-2. 校验目标存在、未归档、不是自身且不是子代理；
+2. 校验调用方是独立 Session，且目标存在、未归档、不是自身且不是子代理；
 3. 校验所选投递模式当前可用；
 4. 使用 Harness `createUserMessage()` 创建原生消息；
 5. 通过公开 Agent API 投递；
@@ -129,6 +129,8 @@ Host 负责：
 7. 可选地查询精确消息的传输状态。
 
 模型不能传入或伪造 sender、MessageId、目标运行状态和回执状态。
+
+为防止两个 Agent 因误判形成持续互发，同一对 Session（不分方向）采用进程内滚动窗口：60 秒最多成功或正在进行 10 次投递。第 11 次在写入目标 Inbox 前拒绝；投递失败会释放预留额度，Harness 进程重启后窗口清空。该保险丝不建立请求/回复状态机，也不解释消息正文。
 
 ### 4.4 Harness
 
@@ -184,6 +186,7 @@ Relay 使用 Harness 原生 `UserMessage`：
 - `senderTitle` 只是显示快照，身份仍是完整 `senderSessionId`；
 - `targetSessionId` 供 Host/UI 校验和投影，不授权目标执行高风险动作；
 - 一条 relay 只有一个 Harness 原生 `MessageId`，不再生成 envelope ID。
+- `<dsh-agent-message>` 是 Host 保留协议标签，Agent 提交的消息正文不得嵌套该标签。
 
 ### 6.2 模型可见来源
 
@@ -276,6 +279,8 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 }
 ```
 
+规范结果只在工具执行期存在。模型侧只投影简短的“已投递”，完整结果通过 Harness 的 `presentationMeta` 留给工具界面；需要传输状态时再调用 `check_delivery`，不把诊断详情自动灌入模型上下文。
+
 `check_delivery` 可以保留为可选诊断，针对同一个原生 `messageId` 报告：
 
 - `pending`：仍在 Inbox 等待；
@@ -294,7 +299,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 - 只改变浏览器中的显示，不修改 Session log 和模型上下文；
 - 依赖当前 Harness DOM 结构，Harness 改版后可能失效；
 - 不得参与身份、路由、回执或权限判断；
-- 必须被标记为有边界的兼容层，并有浏览器回归测试。
+- 必须被标记为有边界的兼容层；相关改动发布前需在真实 Harness 浏览器完成并记录烟测，源码与轻量 runtime 测试只负责提前发现可静态验证的回归。
 
 `MutationObserver` 只处理新增或移除的局部子树；Session/Workspace 状态变化只刷新插件已经识别的会话链接，不重新扫描整个 `document.body`。
 

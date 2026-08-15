@@ -100,7 +100,7 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 
 会话枚举、批量标题和离线日志读取分别使用 Harness 的 `sessionQuery.listSessions()`、`readTitleSnapshots()` 与 `readSession()`。`SessionId` 是唯一地址；`parentSession` 只记录分叉血缘，只有 `origin: subagent` 才会被识别为真实子代理。插件不直接扫描 `sessionPersistence` 重建另一份会话目录。
 
-`send_agent_message` 成功把原生消息提交给目标 Inbox 后立即返回 `accepted` 和该消息的原生 `messageId`；`check_delivery` 根据 Inbox 事件返回 `pending`（仍在排队）、`claimed`（已被某轮认领）、`discarded`（被取消）或 `unknown`。`claimed` 只是传输证据，不表示已读、回复或任务完成。接纳前失败由 Harness 工具错误表示，不写入目标 Inbox。目标是否正在运行通过独立的 `targetRuntimeStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时可从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
+`send_agent_message` 成功把原生消息提交给目标 Inbox 后立即返回 `accepted` 和该消息的原生 `messageId`；模型只接收简短的“已投递”，完整结果保留在工具呈现元数据中。`check_delivery` 根据 Inbox 事件按需返回 `pending`（仍在排队）、`claimed`（已被某轮认领）、`discarded`（被取消）或 `unknown`。`claimed` 只是传输证据，不表示已读、回复或任务完成。接纳前失败由 Harness 工具错误表示，不写入目标 Inbox。目标是否正在运行通过独立的 `targetRuntimeStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时可从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
 
 所有跨会话消息都由 Harness `createUserMessage()` 创建，`UserMessage.id` 是唯一消息身份。`source.kind` 固定为 `dsh-agent-message`，`form` 固定为 `relay`，并携带协议版本、发送/目标 Session 和显示标题。由于当前 Harness 不会把自定义 source 字段展开给模型，Host 还会在正文首行写入只含 `senderSessionId` 的最小 `<dsh-agent-message>` 协议头；source 是持久化/UI 真相，协议头只是回复寻址所需的模型可见投影。插件不注册全局系统提示词，发送准入只存在于 `send_agent_message` 的工具合同中。Client 只把 relay 投影为可见的 Agent 消息卡片，不会反向把 Agent 消息伪装成人类 `user` 来源。
 
@@ -127,6 +127,8 @@ dsh-agent-message/
 ## 限制
 
 - 目标会话必须**未归档**且存在于本机持久化里；归档会话一律拒绝发送。
+- 工具只用于独立 Session 之间通信；真实子代理既不会出现在目标列表中，也不能作为调用方使用这些工具。
+- 同一对 Session（不分发送方向）在滚动 60 秒内最多投递 10 条消息；第 11 条会在写入目标 Inbox 前被拒绝。该窗口只属于当前 Harness 进程，重启后清空。
 - 自动恢复离线会话时会使用**默认模型**（不继承它上次手动切换的模型选择）；恢复失败时消息不会被写入目标 Inbox。
 - 不指定 `messageId` 的批量回执依赖内存记账，只覆盖本进程最近 1000 条发送记录（FIFO 淘汰）；进程重启后仍可凭已知 `messageId` 查询，但不再返回易失的 `sentAt` 和 `mode`。
 - 跨进程/跨机器通信不在本插件范围内。
