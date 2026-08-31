@@ -31,6 +31,7 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
   const listeners = new Map()
   const effects = []
   const ctx = {
+    fiber: { state: 'active' },
     agents: {
       get: (id) => agentMap.get(String(id)),
       list: () => [...agentMap.values()],
@@ -55,6 +56,18 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
       return dispose
     },
     on: (name, listener) => listeners.set(name, listener),
+  }
+  if (services.settings !== undefined) {
+    ctx.inject = (_deps, callback) => callback({
+      settings: services.settings,
+      effect(factory) {
+        const cleanup = factory()
+        if (typeof cleanup !== 'function') return cleanup
+        const dispose = async () => cleanup()
+        effects.push(dispose)
+        return dispose
+      },
+    })
   }
   apply(ctx, config)
   return {
@@ -82,6 +95,39 @@ test('插件不注册全局提示，发送语义只存在于工具合同', () =>
 
   assert.equal(sections, 0)
   assert.deepEqual(inject, ['agents', 'tools', 'sessionQuery'])
+})
+
+test('设置卡片配置只收窄投递细节，始终保留 messageId', async () => {
+  let value = { showTechnicalDetails: true }
+  const watchers = new Set()
+  const settings = {
+    register(namespace, _schema, options) {
+      assert.equal(String(namespace), 'agent-message')
+      assert.deepEqual(options.base, { showTechnicalDetails: true })
+      return {
+        get: () => value,
+        watch(listener) {
+          watchers.add(listener)
+          return () => watchers.delete(listener)
+        },
+      }
+    },
+  }
+  const sender = liveAgent('session-sender')
+  const target = liveAgent('session-target')
+  const { tools } = setup({ agents: [sender, target], services: { settings } })
+  const send = tools.get('send_agent_message')
+  const args = { to: 'session-target', content: '新请求' }
+  const result = await send.execute(args, { agent: sender })
+  const detailed = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
+  assert.match(detailed.content[0].text, /messageId: /)
+  assert.match(detailed.content[0].text, /"mode":"followup"/)
+
+  value = { showTechnicalDetails: false }
+  for (const watcher of watchers) watcher()
+  const compact = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
+  assert.match(compact.content[0].text, /messageId: /)
+  assert.doesNotMatch(compact.content[0].text, /"mode":"followup"/)
 })
 
 test('默认 followup 允许 idle 会话并进入独立下一 turn', async () => {
@@ -114,12 +160,14 @@ test('默认 followup 允许 idle 会话并进入独立下一 turn', async () =>
   assert.match(result.text, /不表示.*已读.*回复.*完成/)
   assert.doesNotMatch(result.text, /结果默认留在目标会话/)
   const args = { to: 'session-target', content: '新请求' }
-  assert.deepEqual(send.output.render(args, result), [{ type: 'text', text: '已投递。' }])
+  assert.deepEqual(send.output.render(args, result), [{ type: 'text', text: '已投递。\nmessageId: ' + result.messageId }])
   const meta = send.output.presentationMeta(args, result)
   assert.deepEqual(meta, result)
-  const presentation = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta })
+  const replayedMeta = JSON.parse(JSON.stringify(meta))
+  const presentation = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: replayedMeta })
   assert.equal(presentation.title, '消息已投递')
   assert.match(presentation.content[0].text, /session-target.*followup/)
+  assert.match(presentation.content[0].text, new RegExp('messageId: ' + result.messageId))
   assert.match(presentation.content[0].text, /不表示.*已读.*回复.*完成/)
   assert.equal(target.inbox.nextTurn.length, 1)
   assert.equal(target.inbox.nextStep.length, 0)
@@ -157,15 +205,16 @@ test('同一对会话双向合计 60 秒最多投递 10 条消息', async () => 
       await send.execute({ to: 'session-a', content: 'B 到 A：' + i }, { agent: b })
     }
 
+    now += 15_000
     await assert.rejects(
       send.execute({ to: 'session-b', content: '第 11 条' }, { agent: a }),
-      /60 秒内最多投递 10 条/,
+      /60 秒内最多投递 10 条消息；请勿立即重试，约 45 秒后窗口重置/,
     )
     assert.equal(a.inbox.nextTurn.length, 5)
     assert.equal(b.inbox.nextTurn.length, 5)
     assert.equal((await send.execute({ to: 'session-a', content: '其他会话对' }, { agent: c })).state, 'accepted')
 
-    now += 60_000
+    now += 45_000
     assert.equal((await send.execute({ to: 'session-b', content: '窗口已重置' }, { agent: a })).state, 'accepted')
   } finally {
     Date.now = originalNow

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-test('会话状态变化只刷新已识别的会话链接，不重新扫描整个页面', async () => {
+test('会话或语言变化只刷新已识别的发送方链接，不重新扫描整个页面', async () => {
   const original = {
     document: globalThis.document,
     Element: globalThis.Element,
@@ -24,6 +24,7 @@ test('会话状态变化只刷新已识别的会话链接，不重新扫描整�
       this.classList = {
         add: (...names) => names.forEach((name) => classes.add(name)),
         contains: (name) => classes.has(name),
+        remove: (...names) => names.forEach((name) => classes.delete(name)),
       }
       this.attributes = new Map()
     }
@@ -35,6 +36,7 @@ test('会话状态变化只刷新已识别的会话链接，不重新扫描整�
     querySelector(selector) { queries.push({ root: this, selector }); return null }
     appendChild(child) { child.parentElement = this; return child }
     setAttribute(name, value) { this.attributes.set(name, String(value)) }
+    removeAttribute(name) { this.attributes.delete(name) }
     getAttribute(name) { return this.attributes.get(name) ?? null }
     hasAttribute(name) { return this.attributes.has(name) }
     remove() { this.isConnected = false }
@@ -52,7 +54,7 @@ test('会话状态变化只刷新已识别的会话链接，不重新扫描整�
   }
   let loaded
   const sessionSubscribers = []
-  const workspaceSubscribers = []
+  const localeSubscribers = []
   const cleanups = []
 
   try {
@@ -71,34 +73,23 @@ test('会话状态变化只刷新已识别的会话链接，不重新扫描整�
     }
     const client = loaded.factory((id) => {
       if (id === 'react') return React
-      if (id === 'react-dom/client') return { createRoot: () => ({ render() {}, unmount() {} }) }
-      if (id === '@deepseek-ai/dsh-client-ui-primitives') {
-        return { IconQueueOutline14() {}, StateDot() {} }
-      }
       throw new Error('unexpected client dependency: ' + id)
     })
-    const workspaces = {
-      list: {
-        getSnapshot: () => ({ archivedSessionIds: [] }),
-        subscribe: (callback) => { workspaceSubscribers.push(callback); return () => {} },
-      },
-    }
     const ctx = {
       sessions: {
         list: {
           getSnapshot: () => ({ ids: [], byId: {} }),
           subscribe: (callback) => { sessionSubscribers.push(callback); return () => {} },
         },
-        binding: () => undefined,
         open() {},
+      },
+      locale: {
+        getSnapshot: () => ({ active: 'zh', revision: 0 }),
+        subscribe: (callback) => { localeSubscribers.push(callback); return () => {} },
       },
       slots: {
         inject(_name, register) { register() },
         register() { return () => {} },
-      },
-      get(name) {
-        if (name === 'workspaces') return workspaces
-        if (name === 'inputTriggers') return { registerSource: () => () => {} }
       },
       effect(factory) {
         const cleanup = factory()
@@ -110,7 +101,7 @@ test('会话状态变化只刷新已识别的会话链接，不重新扫描整�
     client.apply(ctx)
     queries.length = 0
     sessionSubscribers[0]()
-    workspaceSubscribers[0]()
+    localeSubscribers[0]()
 
     assert.deepEqual(queries.filter(({ root }) => root === body), [])
   } finally {

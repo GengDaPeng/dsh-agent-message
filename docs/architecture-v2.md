@@ -4,9 +4,9 @@
 >
 > 初稿：2026-08-14
 >
-> 本次修订：2026-08-15
+> 本次修订：2026-08-31
 >
-> 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的定位、消息投递与传输诊断。
+> 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的引用、消息投递与传输诊断。
 
 ## 1. 设计结论
 
@@ -16,8 +16,8 @@
 
 1. Harness 拥有 Session、Agent runtime、Inbox、持久日志、运行状态和可见性；
 2. Plugin Host 只拥有目标校验、消息构造、投递选择和必要的传输诊断；
-3. Plugin Client 只拥有 `@` 会话选择、显示投影和跳转；
-4. `@` 只回答“指的是哪个 Session”，不自动表示读取或发送；
+3. Harness 原生 Session Reference 拥有 `@` 会话选择和有界只读快照；Plugin Client 只拥有 relay 显示投影、发送方跳转和插件设置；
+4. `@` 会读取一份由 Harness 标记为不可信的有界快照，但不会自动发送消息或唤醒目标；
 5. 消息使用 Harness 原生 `UserMessage` 和原生 `MessageId`，不建立第二套消息系统；
 6. 普通消息默认 `followup`；`steer` 和 `inject` 只在用户或已授权编排明确选择时使用；
 7. 一次通信不得归档、卸载、隐藏或以其他方式改变目标 Session 的产品属性；
@@ -31,18 +31,18 @@
 ### 2.1 当前提供
 
 - 枚举可通信的 Session；
-- 用稳定 `SessionId` 选择目标；
+- 通过 Harness 原生 Session Reference 用稳定 `SessionId` 引用目标；
 - 在用户明确要求发送，或 Agent 已获得持续编排授权时调用消息工具；
 - 使用 `followup`、`steer` 或 `inject` 投递一条原生消息；
 - 在消息中保留发送方 Session，使接收方能按需回复；
 - 提供可选的传输状态查询；
-- 在 Client 中显示会话引用、消息来源和跳转入口。
+- 在 Plugin Client 中显示 relay 消息来源和发送方跳转入口。
 
 ### 2.2 当前不提供
 
 - 不拥有或复制 Session、Agent、Inbox；
 - 不因看到 `@B` 就自动向 B 发消息；
-- 不读取或复制 B 的全部上下文；
+- 不由插件读取或复制 B 的全部上下文；Harness 原生引用只提供有界只读快照；
 - 不把普通 fork 误判为子代理；
 - 不根据 Agent 的 `idle/running` 猜测某项业务是否完成；
 - 不要求 B 返回“收到”等传输确认；
@@ -50,7 +50,7 @@
 - 不建立请求/回复状态机或自动关联；
 - 不实现跨进程、跨机器、广播、共享任务表或独立 mailbox。
 
-读取不属于本通信插件的 Owner 范围。`@` 只帮助 A 定位 B；若宿主提供 Session Reference 或其他只读工具，是否读取、如何读取由 A 使用该正式能力决定。
+读取不属于本通信插件的 Owner 范围。`@` 的快照读取和不可信内容边界由 Harness 原生 Session Reference 拥有；插件既不复制这项能力，也不把引用转换成隐式发送。
 
 ## 3. 稳定对象与 Owner
 
@@ -62,7 +62,7 @@
 | Session ID | `session-...` 形式的唯一地址 | 稳定，是唯一寻址真相源 |
 | Session title | 面向用户的显示名称 | 可变，只用于展示 |
 | Agent runtime | 当前进程中执行某个 Session 的 Agent | 临时，可处于 running/idle/offline |
-| Message Target | Client 选择出的目标引用 | 内部只以完整 `SessionId` 寻址 |
+| Session Reference | Harness 原生结构化会话引用 | 以完整 `SessionId` 标识，并携带有界只读快照 |
 | Relay message | 带插件来源的 Harness 原生 `UserMessage` | 由原生 `MessageId` 唯一标识 |
 | Delivery receipt | 对 Inbox 接纳状态的可选诊断 | 只代表传输，不代表业务结果 |
 
@@ -76,7 +76,7 @@
 | Session 是否归档、是否出现在侧边栏 | Harness / 用户 | 不修改 |
 | Agent runtime 和运行状态 | Harness | 观察，通过公开 Agent API 投递 |
 | Inbox 和消息认领 | Harness Agent | 提交消息，读取可证明的传输事实 |
-| Message Target | Plugin Client | 绑定 Session ID，做显示与导航 |
+| Session Reference | Harness | 绑定 Session ID，读取有界快照并做原生显示 |
 | 是否发送、选择何种模式 | 用户意图或已授权编排职责 | Agent 解释意图，Host 校验模式 |
 | Relay source 和消息正文 | Plugin Host | 从真实调用上下文构造 |
 | 业务回答内容 | 接收方 Agent | 按收到的正文执行；插件不代答 |
@@ -85,7 +85,7 @@
 
 ```mermaid
 flowchart LR
-  U["用户"] --> C["Client<br/>选择、显示、跳转"]
+  U["用户"] --> C["Harness Client<br/>原生引用、relay 显示与导航"]
   C --> A["当前 Agent A<br/>理解完整请求"]
   A --> P["Plugin Host<br/>校验、构造、投递"]
   P --> H["Harness<br/>Session、Agent、Inbox、日志"]
@@ -94,14 +94,14 @@ flowchart LR
 
 ### 4.1 Client
 
-Client 负责：
+Harness Client 的原生 Reference 服务负责 `@` 选择、稳定 ID 和有界快照。Plugin Client 只负责：
 
-- 从 Host/Harness 投影可选 Session；
-- 将标题和完整 `SessionId` 绑定成一个结构化选择；
-- 在输入框和消息气泡中显示可读会话引用；
-- 点击来源或引用时调用 Harness 导航。
+- 将 relay 投影为可见 Agent 消息卡片；
+- 从 typed relay source 解析完整发送方 `SessionId`；
+- 点击或键盘操作消息来源时调用 Harness 导航；
+- 提供复制 Session ID 和投递卡片显示设置。
 
-Client 不决定发送，不选择投递模式，不制造传输状态，也不改变消息协议。
+Plugin Client 不注册 `@` source，不决定发送，不选择投递模式，不制造传输状态，也不改变消息协议。
 
 ### 4.2 当前 Agent A
 
@@ -112,7 +112,7 @@ A 根据用户完整句子判断动作：
 - “立即纠正 B 当前的错误”是发送并选择 `steer`；
 - “不打断 B，补充这份背景”是发送并选择 `inject`。
 
-导航由用户点击 Client 中的会话引用或消息来源完成，不通过消息工具实现。
+引用交互由 Harness 原生 Client 完成；relay 发送方导航由 Plugin Client 完成，均不通过消息工具实现。
 
 工具描述只需告诉模型：当当前请求，或用户已经授予的编排职责，明确要求向其他 Agent 或 Session 传递信息时调用。无需加入全局、持续干扰每轮推理的复杂判断提示词。
 
@@ -144,14 +144,15 @@ Harness 是以下事实的唯一 Owner：
 
 插件不得直接追加核心 Inbox 事件，不得调用私有 wake 方法，也不得维护第二份 pending mailbox。
 
-## 5. `@` 的语义
+## 5. Harness 原生 `@` Session Reference 语义
 
-`@B` 是一个**中性定位符**，等价于“下面这句话涉及 Session B”。它本身不决定动作。
+`@B` 是 Harness 原生的结构化 Session Reference。选择后，Harness 以稳定 `SessionId` 标识 B，并向当前 Agent 注入一份有界、只读、明确标记为不可信的会话快照。因此它不是纯定位符，但也不会向 B 发送消息、唤醒 B 或修改 B。
+
+插件不注册自己的 `@` source，不解析标题寻址，也不实现第二套读取或引用 UI。
 
 | 示例 | 语义 | 是否发送消息 |
 |---|---|---|
-| `@B 帮我分析他最新的对话结果` | 定位后读取/分析 | 否 |
-| 点击输入气泡或消息头中的 `@B` | Client 导航 | 否 |
+| `@B 帮我分析他最新的对话结果` | 使用 Harness 提供的只读引用快照分析 | 否 |
 | `@B 告诉他最后提交 PR draft 就停止` | 定向发送新任务 | 是，默认 followup |
 | `@B 立即纠正当前错误` | 介入运行中的任务 | 是，steer |
 | `@B 把这份资料补充给他，不要打断` | 补充运行中上下文 | 是，inject |
@@ -279,7 +280,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 }
 ```
 
-规范结果只在工具执行期存在。模型侧只投影简短的“已投递”，完整结果通过 Harness 的 `presentationMeta` 留给工具界面；需要传输状态时再调用 `check_delivery`，不把诊断详情自动灌入模型上下文。
+规范结果只在工具执行期存在。模型侧投影“已投递”和原生 `messageId`，完整结果通过 Harness 的 `presentationMeta` 留给工具界面，卡片同样显示可选择复制的 `messageId`；需要传输状态时再调用 `check_delivery`，不把其余诊断详情自动灌入模型上下文。
 
 `check_delivery` 可以保留为可选诊断，针对同一个原生 `messageId` 报告：
 
@@ -294,14 +295,14 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 消息卡片和可点击来源是用户体验层，不是协议层。
 
-当前 Client 使用 `MutationObserver` 查找 Harness 已渲染的消息节点、展开折叠行、隐藏模型可见协议首行并增加来源样式。这些操作：
+当前 Plugin Client 使用 `MutationObserver` 查找 Harness 已渲染的 relay 消息节点、展开折叠行、隐藏模型可见协议首行并增加发送方样式。这些操作：
 
 - 只改变浏览器中的显示，不修改 Session log 和模型上下文；
 - 依赖当前 Harness DOM 结构，Harness 改版后可能失效；
 - 不得参与身份、路由、回执或权限判断；
 - 必须被标记为有边界的兼容层；相关改动发布前需在真实 Harness 浏览器完成并记录烟测，源码与轻量 runtime 测试只负责提前发现可静态验证的回归。
 
-`MutationObserver` 只处理新增或移除的局部子树；Session/Workspace 状态变化只刷新插件已经识别的会话链接，不重新扫描整个 `document.body`。
+`MutationObserver` 只处理新增或移除的局部子树；Session 状态变化只刷新插件已经识别的 relay 发送方链接，不重新扫描整个 `document.body`。
 
 这里所说的“兼容层”不是功能无效，而是 Harness 当前没有给外部插件开放稳定的核心 user/message renderer 替换接口。未来出现官方 renderer seam 时再迁移；在此之前不为它额外建立 UI 框架。
 
@@ -310,7 +311,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 | 侧 | 必需服务 | 缺失时行为 |
 |---|---|---|
 | Host | `agents`、`tools`、`sessionQuery` | 插件不加载，不自行扫描日志或仿造运行时 |
-| Client | runtime、session/workspace、input trigger、UI slots | Client 扩展不加载；Host 工具仍可工作 |
+| Client | runtime、sessions、locale、conversation、settings、UI slots | Client 扩展不加载；Host 工具仍可工作 |
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
@@ -319,7 +320,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 1. 完整 `SessionId` 是唯一地址，标题变化不改变目标；
 2. 普通 fork 不因存在 `parentSession` 被排除；
 3. 只有明确 `origin === "subagent"` 的真实子代理被过滤；
-4. `@B` 本身不读取、不发送、不唤醒 B；
+4. `@B` 只触发 Harness 原生的有界只读快照，不发送、不唤醒 B；
 5. 用户未明确要求发送，且不存在已授权编排职责时，不调用消息工具；
 6. 新任务默认 `followup`，每条消息形成独立 FIFO turn；
 7. `steer/inject` 只接受 running 目标，且不会被插件自动选择；
@@ -335,10 +336,21 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 17. Client DOM 美化失效时，消息投递、来源和权限仍然正确；
 18. 当前没有第二份 Inbox、spool、自动回复状态机或跨进程 transport。
 
-## 14. 证据与参考
+## 14. 验证记录
 
-- 当前实现：[`lib/index.js`](../lib/index.js)、[`lib/client.js`](../lib/client.js)。
-- [DeepSeek Harness 开发手册](https://deepseek-harness.github.io/deepseek-harness/develop/basic/)。
-- [DeepSeek Harness Session Reference](https://deepseek-harness.github.io/deepseek-harness/reference/subsystems/session-reference)。
-- [Codex App Server](https://developers.openai.com/codex/app-server)：读取、inject、turn start 与 steer 分离。
-- [Claude Code 跨会话消息](https://code.claude.com/docs/en/cross-session-messaging)：`@session` 定位、独立上下文和来源边界。
+最小可重复验证：
+
+```sh
+pnpm test
+pnpm run test:web-smoke
+pnpm peers check
+```
+
+`test:web-smoke` 启动当前 Web Profile，验证组合中只有一份 Harness 原生 `ui-reference` 与本插件，并检查首页 HTTP 200；它不替代真实浏览器交互。
+
+2026-08-31 在 Harness `0.1.1-rc.2` 上使用两个 `DeepSeek-V4-Flash + Low` 会话完成真实浏览器冒烟：
+
+- Harness 原生 `@` 菜单可选 Session，并产生结构化引用与有界快照；
+- A 通过插件发送唯一验证串，B 原样回传，双向 relay 卡片均正确显示；
+- 发送方跳转、复制 Session ID、设置开关与重置、跟随 Harness locale 均通过；
+- 模型可见的来源协议头在界面中隐藏，仅作为持久 source 的回复寻址投影。

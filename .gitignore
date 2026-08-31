@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Keep repository Markdown under docs/ limited to the active architecture contract.
+docs/*.md
+docs/**/*.md
+!docs/architecture-v2.md
