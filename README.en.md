@@ -25,9 +25,10 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 | `list_peer_agents` | List all **sendable independent sessions**: non-archived, excluding actual subagents while retaining ordinary forks; returns id, title, working directory, and runtime status |
 | `send_agent_message` | Send a message to a session id; `followup` creates an independent turn by default and offline targets are resumed automatically; explicit modes are `followup`, `inject`, and `steer` |
 | `check_delivery` | Query receipts on demand (pending/claimed/discarded/unknown); a successful send first returns accepted, while pre-admission failure is a tool error; explicit message ids remain queryable after restart |
-| `@` session locator | Type `@` at the beginning of the composer and choose a target; candidates show only the session title and `Running`/`Idle`, excluding blank placeholders and subagents. The user sees a readable title while the current Agent receives the stable session id; `@` only locates the session, and the full-sentence intent determines whether to send, read, or analyze |
-| Visible Agent message card | Relay keeps its true plugin provenance while the Client presents it as a left-aligned Agent message card; `From Session · <name>:` opens the sender by click or keyboard |
+| Native Harness `@` session reference | Reuse Harness's structured Session Reference directly. The current Agent receives the stable Session ID plus a bounded, read-only snapshot marked as untrusted. Referencing alone does not send a message or wake the target |
+| Visible Agent message card | Relay keeps its true plugin provenance while the Client presents it as a left-aligned Agent message card; `From Session · <name>:` opens the sender by click or keyboard, with labels following the Harness language setting |
 | Copy session id | A "Copy ID" button is added to the session header for one-click copying of the current session id |
+| Delivery card settings | In Settings → Plugin configuration, toggle delivery mode and target runtime details; `messageId` is always shown |
 
 ### Sender navigation example
 
@@ -55,7 +56,7 @@ dsh plugin --profile web add dsh-agent-message
 
 It self-registers on install; no extra configuration is needed.
 
-Compatibility: Node.js 24 and DeepSeek Harness `>=0.1.0-rc.6 <0.2.0`; currently verified with Node.js `24.x` and Harness `0.1.0-rc.6`.
+Compatibility: Node.js 24 and DeepSeek Harness `>=0.1.1-rc.2 <0.2.0`; currently verified with Node.js `24.x` and Harness `0.1.1-rc.2`.
 
 ### Option 2: Install from GitHub
 
@@ -77,8 +78,8 @@ The plugin ships a `cordis.patch.yml` (pointed to by `dsh.bundle.patch` in `pack
 
 ## Usage
 
-1. Type `@` at the beginning of session A's composer and choose the target from the native candidate menu; each candidate shows its title and `Running`/`Idle` activity;
-2. `@` only tells A where the relevant session is; it does not mean send. A calls `send_agent_message` only when the current request or an orchestration responsibility already granted by the user requires cross-session communication. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` must not send a message to B;
+1. Type `@` in session A's composer and choose the target session from Harness's native candidate menu;
+2. Harness gives A a bounded, read-only, untrusted snapshot of that Session, but does not message or wake B. A calls `send_agent_message` only when the current request or an orchestration responsibility already granted by the user explicitly requires cross-session communication. For example, `@B tell it to stop after opening the draft PR` sends, while `@B analyze its latest conversation result` only uses the referenced snapshot;
 3. For an explicit forwarding request, A only delivers and reports whether the message was accepted or failed. It must not execute the forwarded task itself or ask B for an extra acknowledgement. B sends a message to `senderSessionId` only when the body explicitly asks it to return business content;
 4. You can still ask the Agent to call `list_peer_agents` and send directly with a full session id;
 5. Session B receives a native `UserMessage` with a typed relay source plus a minimal Host-generated source header on the first body line, so B does not have to guess the sender. The Client presents it as a visible Agent message card whose header opens the sender session;
@@ -99,13 +100,13 @@ Delivery paths of `send_agent_message`:
 
 Session enumeration, batched titles, and offline log reads use Harness's `sessionQuery.listSessions()`, `readTitleSnapshots()`, and `readSession()` respectively. `SessionId` is the only address; `parentSession` records fork lineage only, and only `origin: subagent` identifies an actual subagent. The plugin does not scan `sessionPersistence` directly to rebuild a parallel session directory.
 
-After `send_agent_message` submits the native message to the target Inbox, it immediately returns `accepted` with the native `messageId`; the model receives only a terse “delivered” projection while the complete result stays in tool presentation metadata. `check_delivery` then derives `pending` (still queued), `claimed` (claimed by a turn), `discarded` (cancelled), or `unknown` from Inbox events on demand. `claimed` is transport evidence only: it does not prove that the message was read, answered, or completed. Pre-admission failure remains a Harness tool error and writes nothing to the target Inbox. Runtime state is reported separately as `targetRuntimeStatus`, so unrelated Agent activity never changes the message state. A known `messageId` remains queryable from the target Inbox log after a process restart.
+After `send_agent_message` submits the native message to the target Inbox, it immediately returns `accepted` with the native `messageId`; both the terse tool result and the full tool card show a selectable `messageId` for copying, while the complete result also stays in tool presentation metadata. `check_delivery` then derives `pending` (still queued), `claimed` (claimed by a turn), `discarded` (cancelled), or `unknown` from Inbox events on demand. `claimed` is transport evidence only: it does not prove that the message was read, answered, or completed. Pre-admission failure remains a Harness tool error and writes nothing to the target Inbox. Runtime state is reported separately as `targetRuntimeStatus`, so unrelated Agent activity never changes the message state. A known `messageId` remains queryable from the target Inbox log after a process restart.
 
 Every cross-session message is created by Harness `createUserMessage()`, and `UserMessage.id` is its only message identity. Its source always uses `kind: dsh-agent-message` and `form: relay`, plus the protocol version, sender/target Session ids, and display title. Because current Harness model requests do not expand custom source fields, the Host also writes a minimal `<dsh-agent-message>` header containing only `senderSessionId` on the first body line. The typed source is the durable/UI truth; the header is only the model-visible projection needed for reply addressing. The plugin registers no global system prompt; send admission lives only in the `send_agent_message` tool contract. The Client only projects relay as a visible Agent message card and never rewrites an Agent message as human `user` provenance.
 
 Relay only means “a message addressed by another session”; it neither requires nor forbids a reply. When the body explicitly requests business content in return, the receiving Agent may send a message to `senderSessionId` with the same tool. Otherwise it must not send a transport acknowledgement or a bare “received.” The plugin does not automatically correlate requests and replies or forward ordinary Agent answers.
 
-The composer-side `@` session locator reuses Harness's native `inputTriggers` command marker. The visible selected title is capped at 40 Unicode characters with an ellipsis; submission replaces it with the full stable `@session-...` id for the current Agent. The sent bubble still projects that id with a chat icon and the live session title, so renaming a session does not change the locator target.
+Composer-side `@` is provided entirely by Harness's native `ui-reference` / `session-reference` services. Harness retains the stable Session ID in the structured reference and owns bounded snapshot loading and injection. The plugin no longer registers an `@` source, parses titles for addressing, or maintains a second session-reference UI.
 
 See [`docs/architecture-v2.md`](./docs/architecture-v2.md) for the current architecture contract.
 
@@ -115,13 +116,24 @@ See [`docs/architecture-v2.md`](./docs/architecture-v2.md) for the current archi
 dsh-agent-message/
 ├── lib/
 │   ├── index.js        # host half: list_peer_agents / send_agent_message / check_delivery
-│   └── client.js       # client half: @session references, session navigation and copy-session-id button
+│   └── client.js       # client half: relay display, sender navigation, settings, and copy-session-id button
 ├── cordis.patch.yml    # self-registration patch (pointed to by dsh.bundle.patch)
 ├── package.json        # DSH plugin manifest (dsh.bundle / dsh.client / dshx.contributes)
-├── docs/               # current architecture and README example screenshot
+├── docs/               # active/proposed architecture and README example screenshot
+├── scripts/web-smoke.mjs # real Web Profile startup and configuration smoke test
 ├── README.md           # Chinese documentation
 └── README.en.md        # English documentation
 ```
+
+## Development validation
+
+```sh
+pnpm test
+pnpm run test:web-smoke
+pnpm peers check
+```
+
+`test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [architecture validation record](./docs/architecture-v2.md#14-验证记录) for real interaction coverage.
 
 ## Limitations
 
