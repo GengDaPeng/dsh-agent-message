@@ -3,14 +3,36 @@ import test from 'node:test'
 
 import { apply, inject } from '../lib/index.js'
 
-function liveAgent(id, title = id) {
+/**
+ * 会话替身，按当前宿主合同区分「自有事件」与「继承前缀」。
+ * `inherited` 模拟分叉从父会话继承的历史——它属于父会话，不属于本会话，
+ * 因此 `ownEvents()` 必须只返回自有事件（与真实宿主一致）。
+ * `pile` 保留完整日志，仅作为「插件是否误用整份日志」的探针。
+ */
+function makeSession({ inherited = [], own = [], header = {} } = {}) {
+  const pile = [...inherited, ...own]
+  return {
+    header: { cwd: '/tmp', isSeeded: inherited.length > 0, ...header },
+    inheritedEventCount: inherited.length,
+    ownEvents: () => own.slice(),
+    snapshotEvents: () => pile.slice(),
+    get events() { return pile.slice() },
+    append(event) { own.push(event); pile.push(event) },
+  }
+}
+
+function spliced(target, inserted, removedCount = 0) {
+  return { type: 'agent/inbox/spliced', data: { target, start: 0, ...(removedCount > 0 ? { removedCount } : {}), inserted } }
+}
+
+function liveAgent(id, title = id, session = makeSession()) {
   const nextTurn = []
   const nextStep = []
   return {
     id,
     status: 'idle',
     wakeCount: 0,
-    session: { header: { cwd: '/tmp' }, events: [] },
+    session,
     inbox: {
       nextTurn,
       nextStep,
@@ -704,10 +726,8 @@ test('消息被认领后不因目标正在运行而夸大为 processing', async 
   )
   const message = target.inbox.nextTurn.shift()
   target.status = 'running'
-  target.session.events = [
-    { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [message] } },
-    { type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [] } },
-  ]
+  target.session.append(spliced('next-turn', [message]))
+  target.session.append(spliced('next-turn', [], 1))
 
   const result = await tools.get('check_delivery').execute({
     to: 'session-target',
@@ -740,7 +760,8 @@ test('查询未记账的指定消息时显式返回 unknown', async () => {
 test('重启后凭 messageId 从目标日志恢复回执', async () => {
   const sessionQuery = {
     readSession: async () => ({
-      session: { id: 'session-target', seedLength: 0 },
+      session: { id: 'session-target', isSeeded: false },
+      inheritedEventCount: 0,
       events: [{
         seq: 0,
         type: 'agent/inbox/spliced',
@@ -774,7 +795,8 @@ test('批量查询同一离线会话的回执只读取一次日志', async () =>
     readSession: async () => {
       reads += 1
       return {
-        session: { id: 'session-target', seedLength: 0 },
+        session: { id: 'session-target', isSeeded: false },
+        inheritedEventCount: 0,
         events: [{
           seq: 0,
           type: 'agent/inbox/spliced',
@@ -805,4 +827,199 @@ test('批量查询同一离线会话的回执只读取一次日志', async () =>
   assert.equal(result.entries.length, 2)
   assert.deepEqual(result.entries.map((entry) => entry.state), ['pending', 'pending'])
   assert.equal(reads, 1)
+})
+
+test('在线分叉不会把父会话的投递与认领历史当作自身回执', async () => {
+  const sender = liveAgent('session-sender')
+  // 父会话：A 发来的消息已插入并被认领（父会话自有事件）。
+  const parentEvents = [
+    spliced('next-turn', [{ id: 'agent-msg-parent' }]),
+    spliced('next-turn', [], 1),
+  ]
+  const parent = liveAgent('session-parent', 'session-parent', makeSession({ own: parentEvents }))
+  // 分叉继承父会话这两条事件；继承前缀属于父会话，不属于分叉。
+  const fork = liveAgent('session-fork', 'session-fork', makeSession({
+    inherited: parentEvents,
+    header: { parentSession: 'session-parent' },
+  }))
+  const { tools } = setup({ agents: [sender, parent, fork] })
+
+  const inherited = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender })
+
+  assert.equal(inherited.entries[0].state, 'unknown')
+
+  // 向分叉新发送的消息仍必须能正确查询。
+  const sent = await tools.get('send_agent_message').execute(
+    { to: 'session-fork', content: '发给分叉的消息' },
+    { agent: sender },
+  )
+  fork.session.append(spliced('next-turn', [{ id: sent.messageId }]))
+
+  const own = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: sent.messageId,
+  }, { agent: sender })
+
+  assert.equal(own.entries[0].state, 'pending')
+})
+
+test('重启后离线分叉同样不继承父会话回执', async () => {
+  const sender = liveAgent('session-sender')
+  const parentEvents = [
+    spliced('next-turn', [{ id: 'agent-msg-parent' }]),
+    spliced('next-turn', [], 1),
+  ]
+  const sessionQuery = {
+    readSession: async () => ({
+      session: { id: 'session-fork', isSeeded: true, parentSession: 'session-parent' },
+      // 离线快照同时给出完整日志与公开继承边界。
+      inheritedEventCount: parentEvents.length,
+      events: [...parentEvents, spliced('next-turn', [{ id: 'agent-msg-fork' }])],
+    }),
+  }
+  const { tools } = setup({ agents: [sender], services: { sessionQuery } })
+
+  const inherited = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender })
+  const own = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-fork',
+  }, { agent: sender })
+
+  assert.equal(inherited.entries[0].state, 'unknown')
+  assert.equal(own.entries[0].state, 'pending')
+})
+
+test('继承边界无法确定时受控失败，不静默按无继承历史折叠', async () => {
+  const sender = liveAgent('session-sender')
+  // 声明有分叉（isSeeded）却缺少可用的继承边界。
+  const sessionQuery = {
+    readSession: async () => ({
+      session: { id: 'session-fork', isSeeded: true },
+      events: [spliced('next-turn', [{ id: 'agent-msg-parent' }])],
+    }),
+  }
+  const { tools } = setup({ agents: [sender], services: { sessionQuery } })
+
+  await assert.rejects(tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender }), /无法确定.*继承边界/)
+
+  // 宿主给出事件却没有可判定的边界/头信息时同样失败，而不是返回 unknown。
+  const opaque = liveAgent('session-opaque', 'session-opaque', {
+    events: [spliced('next-turn', [{ id: 'agent-msg-parent' }])],
+  })
+  const unsupported = setup({ agents: [sender, opaque] })
+  await assert.rejects(unsupported.tools.get('check_delivery').execute({
+    to: 'session-opaque',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender }), /无法确定.*继承边界/)
+})
+
+test('旧版 header.seedLength 合同仍可确定继承边界', async () => {
+  const sender = liveAgent('session-sender')
+  const parentEvents = [spliced('next-turn', [{ id: 'agent-msg-parent' }])]
+  const legacyOwn = spliced('next-turn', [{ id: 'agent-msg-fork' }])
+
+  // 旧版在线会话：无 ownEvents()，边界只在 header.seedLength 上。
+  const legacyAgent = liveAgent('session-legacy', 'session-legacy', {
+    header: { cwd: '/tmp', seedLength: parentEvents.length },
+    events: [...parentEvents, legacyOwn],
+  })
+  const online = setup({ agents: [sender, legacyAgent] })
+  const onlineInherited = await online.tools.get('check_delivery').execute({
+    to: 'session-legacy',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender })
+  const onlineOwn = await online.tools.get('check_delivery').execute({
+    to: 'session-legacy',
+    messageId: 'agent-msg-fork',
+  }, { agent: sender })
+
+  assert.equal(onlineInherited.entries[0].state, 'unknown')
+  assert.equal(onlineOwn.entries[0].state, 'pending')
+
+  // 旧版离线快照：边界在 session.seedLength 上，无 inheritedEventCount。
+  const offline = setup({
+    agents: [sender],
+    services: {
+      sessionQuery: {
+        readSession: async () => ({
+          session: { id: 'session-legacy-offline', seedLength: parentEvents.length },
+          events: [...parentEvents, legacyOwn],
+        }),
+      },
+    },
+  })
+  const offlineInherited = await offline.tools.get('check_delivery').execute({
+    to: 'session-legacy-offline',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender })
+  const offlineOwn = await offline.tools.get('check_delivery').execute({
+    to: 'session-legacy-offline',
+    messageId: 'agent-msg-fork',
+  }, { agent: sender })
+
+  assert.equal(offlineInherited.entries[0].state, 'unknown')
+  assert.equal(offlineOwn.entries[0].state, 'pending')
+})
+
+test('离线读取优先使用宿主 observeSession，并按其继承边界归属回执', async () => {
+  const sender = liveAgent('session-sender')
+  const parentEvents = [spliced('next-turn', [{ id: 'agent-msg-parent' }])]
+  const forkOwn = spliced('next-turn', [{ id: 'agent-msg-fork' }])
+  const full = [...parentEvents, spliced('session/end-seed', []), forkOwn]
+  let readSessionCalls = 0
+  let disposed = 0
+  const sessionQuery = {
+    // 当前宿主上 readSession 对分叉会话会抛错，因此不该被走到。
+    readSession: async () => { readSessionCalls += 1; throw new Error('seeded session constructor seed must equal its inherited prefix') },
+    observeSession: async () => ({
+      source: 'prepared',
+      header: { id: 'session-fork', isSeeded: true, parentSession: 'session-parent' },
+      inheritedEventCount: 2,
+      events: full,
+      [Symbol.dispose]() { disposed += 1 },
+    }),
+  }
+  const { tools } = setup({ agents: [sender], services: { sessionQuery } })
+
+  const inherited = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-parent',
+  }, { agent: sender })
+  const own = await tools.get('check_delivery').execute({
+    to: 'session-fork',
+    messageId: 'agent-msg-fork',
+  }, { agent: sender })
+
+  assert.equal(inherited.entries[0].state, 'unknown')
+  assert.equal(own.entries[0].state, 'pending')
+  assert.equal(readSessionCalls, 0, '不应回退到对分叉会话会抛错的 readSession')
+  assert.equal(disposed, 2, '每次观察都必须释放 observation')
+})
+
+test('宿主只提供 readSession 时回退到旧接口', async () => {
+  const sender = liveAgent('session-sender')
+  const sessionQuery = {
+    readSession: async () => ({
+      session: { id: 'session-only-read', isSeeded: false },
+      inheritedEventCount: 0,
+      events: [spliced('next-turn', [{ id: 'agent-msg-read-only' }])],
+    }),
+  }
+  const { tools } = setup({ agents: [sender], services: { sessionQuery } })
+
+  const result = await tools.get('check_delivery').execute({
+    to: 'session-only-read',
+    messageId: 'agent-msg-read-only',
+  }, { agent: sender })
+
+  assert.equal(result.entries[0].state, 'pending')
 })
