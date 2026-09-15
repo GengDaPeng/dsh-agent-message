@@ -144,6 +144,8 @@ Harness 是以下事实的唯一 Owner：
 
 插件不得直接追加核心 Inbox 事件，不得调用私有 wake 方法，也不得维护第二份 pending mailbox。
 
+回执归属只折叠目标 Session **自有**的 Inbox 事件，且在线与离线共用一条规则。继承边界取自宿主公开信息：在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧合同为 `header.seedLength`。分叉继承的父会话历史属于父会话，不得计入分叉回执；宿主声明存在分叉却没有可判定边界时返回受控错误，不静默按「无继承历史」折叠，也不伪装成 `unknown`。
+
 ## 5. Harness 原生 `@` Session Reference 语义
 
 `@B` 是 Harness 原生的结构化 Session Reference。选择后，Harness 以稳定 `SessionId` 标识 B，并向当前 Agent 注入一份有界、只读、明确标记为不可信的会话快照。因此它不是纯定位符，但也不会向 B 发送消息、唤醒 B 或修改 B。
@@ -238,7 +240,7 @@ stateDiagram-v2
 
 当目标未加载时：
 
-1. 通过 `sessionQuery` 确认 Logical Session 存在且可通信；
+1. 通过 `sessionQuery.observeSession()` 读取一份逻辑会话观察，确认目标存在且可通信；该接口同时给出会话头、精确继承边界与事件，且能读取分叉会话。宿主未提供它时才回退到 `readSession()`——当前宿主上 `readSession()` 对分叉会话会因「种子必须等于继承前缀」直接抛错；
 2. 调用公开 `agents.resume()`；
 3. 持有返回的 `AgentHandle`；
 4. 调用 `handle.agent.followup(message)`；

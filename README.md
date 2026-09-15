@@ -57,7 +57,7 @@ dsh plugin --profile web add dsh-agent-message
 
 装完即自动注册，无需任何额外配置。
 
-兼容范围：Node.js 24、DeepSeek Harness `>=0.1.1-rc.2 <0.2.0`；当前验证版本为 Node.js `24.x`、Harness `0.1.1-rc.2`。
+兼容范围：Node.js 24、DeepSeek Harness `>=0.1.1-rc.2 <0.2.0`。会话日志读取与回执归属路径已分别按旧合同 `0.1.1-rc.2` 与当前合同 `0.1.5-rc.1`（随附 `dsh-session-query` `0.1.5-rc.2`）核对；Node.js 验证版本为 `24.x`。
 
 ### 方式二：从 GitHub 安装
 
@@ -97,11 +97,13 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 
 - **在线普通消息**：通过 `agents` 注册表找到目标 Agent，调用 `followup()` 进入独立的 `next-turn`；
 - **运行中高级语义**：用户无需说出模式名；Agent 根据整句话判断，明确要求立即介入时使用 `steer()`，明确要求不打断当前任务、只补充上下文时使用 `inject()`；目标必须确实为 `running`，判断不清时仍使用默认 `followup()`；
-- **离线普通消息**：先由 `sessionQuery.readSession()` 读取同一份逻辑会话快照并校验目标，再通过公开 `agents.resume()` 恢复、调用 `followup()`；插件持有并复用恢复得到的 handle，目标回到 idle 后仍保持加载，只在插件卸载时释放。恢复失败直接返回失败，不伪造核心 Inbox 事件作为留言。
+- **离线普通消息**：先由 `sessionQuery.observeSession()` 读取同一份逻辑会话快照并校验目标，再通过公开 `agents.resume()` 恢复、调用 `followup()`；插件持有并复用恢复得到的 handle，目标回到 idle 后仍保持加载，只在插件卸载时释放。恢复失败直接返回失败，不伪造核心 Inbox 事件作为留言。
 
-会话枚举、批量标题和离线日志读取分别使用 Harness 的 `sessionQuery.listSessions()`、`readTitleSnapshots()` 与 `readSession()`。`SessionId` 是唯一地址；`parentSession` 只记录分叉血缘，只有 `origin: subagent` 才会被识别为真实子代理。插件不直接扫描 `sessionPersistence` 重建另一份会话目录。
+会话枚举、批量标题和离线日志读取分别使用 Harness 的 `sessionQuery.listSessions()`、`readTitleSnapshots()` 与 `observeSession()`。`SessionId` 是唯一地址；`parentSession` 只记录分叉血缘，只有 `origin: subagent` 才会被识别为真实子代理。插件不直接扫描 `sessionPersistence` 重建另一份会话目录。选择 `observeSession()` 是因为它同时给出会话头、精确继承边界与事件，且能读取分叉会话；旧的 `readSession()` 在当前宿主上对分叉会话会直接抛错（种子必须等于继承前缀），仅作为宿主未提供前者时的回退。
 
 `send_agent_message` 成功把原生消息提交给目标 Inbox 后立即返回 `accepted` 和该消息的原生 `messageId`；精简工具结果和完整工具卡片都会显示可选择复制的 `messageId`，完整结果同时保留在工具呈现元数据中。`check_delivery` 根据 Inbox 事件按需返回 `pending`（仍在排队）、`claimed`（已被某轮认领）、`discarded`（被取消）或 `unknown`。`claimed` 只是传输证据，不表示已读、回复或任务完成。接纳前失败由 Harness 工具错误表示，不写入目标 Inbox。目标是否正在运行通过独立的 `targetRuntimeStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时可从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
+
+回执归属只统计目标会话**自有**的 Inbox 事件，在线与离线使用同一条规则。分叉会话继承的父会话历史属于父会话：父会话收到的消息被认领或丢弃，不会出现在分叉的回执里；向分叉新发送的消息仍可正常查询。边界取自宿主公开的继承信息（在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧版合同为 `header.seedLength`）。宿主既声明存在分叉、又无法给出可判定边界时，查询返回明确的受控错误，不静默按「没有继承历史」折叠，也不伪装成 `unknown`。
 
 所有跨会话消息都由 Harness `createUserMessage()` 创建，`UserMessage.id` 是唯一消息身份。`source.kind` 固定为 `dsh-agent-message`，`form` 固定为 `relay`，并携带协议版本、发送/目标 Session 和显示标题。由于当前 Harness 不会把自定义 source 字段展开给模型，Host 还会在正文首行写入只含 `senderSessionId` 的最小 `<dsh-agent-message>` 协议头；source 是持久化/UI 真相，协议头只是回复寻址所需的模型可见投影。插件不注册全局系统提示词，发送准入只存在于 `send_agent_message` 的工具合同中。Client 只把 relay 投影为可见的 Agent 消息卡片，不会反向把 Agent 消息伪装成人类 `user` 来源。
 
