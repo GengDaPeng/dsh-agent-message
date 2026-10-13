@@ -5,7 +5,7 @@ import test from 'node:test'
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 test('Client 文案跟随 Harness locale，而不是浏览器语言猜测', () => {
-  assert.match(source, /"settingsScope", "locale"/)
+  assert.match(source, /"configForms", "locale"/)
   assert.match(source, /ctx\.locale\.getSnapshot\(\)/)
   assert.match(source, /React\.useSyncExternalStore/)
   assert.doesNotMatch(source, /document\.documentElement\.lang|navigator\.language/)
@@ -31,7 +31,7 @@ test('relay 来源支持鼠标及键盘打开完整 Session ID', () => {
   assert.match(source, /dataset\.agentMsgSessionId/)
   assert.match(source, /setAttribute\("role", "link"\)/)
   assert.match(source, /event\.key !== "Enter" && event\.key !== " "/)
-  assert.match(source, /ctx\.sessions\.open\(sessionId\)/)
+  assert.match(source, /ctx\.uiWorkspace\.openSession\(sessionId\)/)
   assert.match(source, /document\.addEventListener\("click", openSender\)/)
   assert.match(source, /document\.removeEventListener\("click", openSender\)/)
 })

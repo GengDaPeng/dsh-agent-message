@@ -4,7 +4,7 @@
 >
 > 初稿：2026-08-14
 >
-> 本次修订：2026-08-31
+> 本次修订：2026-10-13，DSH 0.2.0-rc.2
 >
 > 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的引用、消息投递与传输诊断。
 
@@ -36,6 +36,7 @@
 - 使用 `followup`、`steer` 或 `inject` 投递一条原生消息；
 - 在消息中保留发送方 Session，使接收方能按需回复；
 - 提供可选的传输状态查询；
+- 通过用户配置的稳定 Session 配对、相同 cwd 和有限原生日志消息预算限制通信；
 - 在 Plugin Client 中显示 relay 消息来源和发送方跳转入口。
 
 ### 2.2 当前不提供
@@ -121,7 +122,7 @@ A 根据用户完整句子判断动作：
 Host 负责：
 
 1. 从工具执行上下文派生真实 `senderSessionId`；
-2. 校验调用方是独立 Session，且目标存在、未归档、不是自身且不是子代理；
+2. 校验调用方和目标是用户配置的稳定 Session 配对、同非空 cwd、未归档且不是自身或真实子代理；
 3. 校验所选投递模式当前可用；
 4. 使用 Harness `createUserMessage()` 创建原生消息；
 5. 通过公开 Agent API 投递；
@@ -291,6 +292,19 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 它不能报告“已读”“已回复”或“已完成”。内存 Map 只能作为有界缓存，不能成为跨重启的稳定对象。
 
+0.2 的在线和离线回执统一读取公开 `sessionQuery.readSession`，按
+`inheritedEventCount` 排除 fork 继承的父 Inbox 前缀。内存发送表和原生消息来源
+都校验真实 sender/target，不能查询其他调用方的投递。异步查询、恢复 setup、
+发布 commit 和原生投递前均复查身份、归档、cwd 和取消信号。
+
+三个工具默认没有权限；`allowedPairs` 明确授予两条稳定 ID、协作 id 和
+`maxMessages`。消息预算按双方自己的原生 Inbox 插入事件统计，双向总计且
+跨重启保留；同一配对的预算查询与投递串行。模型不能配置或清零预算。
+
+显示偏好 `showTechnicalDetails` 是 volatile Config 字段，Host 读取其公开
+`.get()` 值，Client 使用 `configForms` 和 `plugins.bundle.config`。表单只暴露该显示字段，
+修改时不重挂消息工具，不暴露 `allowedPairs`。messageId 始终显示。
+
 ## 11. Client UI 兼容边界
 
 消息卡片和可点击来源是用户体验层，不是协议层。
@@ -304,14 +318,18 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 `MutationObserver` 只处理新增或移除的局部子树；Session 状态变化只刷新插件已经识别的 relay 发送方链接，不重新扫描整个 `document.body`。
 
+rc.2 的非人类输入显示在 `data-turn-trigger` notice 中；只装饰匹配本插件协议的
+正文，保留原始非人类来源。发送方通过公开 `uiWorkspace.openSession` 导航。
+侧栏菜单使用 `sidebar.workspaces.session.menu.item` 的行级 `sessionId` 复制地址。
+
 这里所说的“兼容层”不是功能无效，而是 Harness 当前没有给外部插件开放稳定的核心 user/message renderer 替换接口。未来出现官方 renderer seam 时再迁移；在此之前不为它额外建立 UI 框架。
 
 ## 12. 依赖与降级
 
 | 侧 | 必需服务 | 缺失时行为 |
 |---|---|---|
-| Host | `agents`、`tools`、`sessionQuery` | 插件不加载，不自行扫描日志或仿造运行时 |
-| Client | runtime、sessions、locale、conversation、settings、UI slots | Client 扩展不加载；Host 工具仍可工作 |
+| Host | `agents`、`tools`、`sessionQuery`、`workspaceRegistry` | 插件不加载，不自行扫描日志或仿造运行时 |
+| Client | runtime、sessions、locale、configForms、uiWorkspace、UI slots | Client 扩展不加载；Host 工具仍可工作 |
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
@@ -337,6 +355,9 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 18. 当前没有第二份 Inbox、spool、自动回复状态机或跨进程 transport。
 
 ## 14. 验证记录
+
+当前 0.2 补丁的验证和复现见 [validation-0.2.0-rc.2.md](validation-0.2.0-rc.2.md)。
+以下原记录对应 0.1.1-rc.2，是历史基线，不能替代当前版本验收。
 
 最小可重复验证：
 
