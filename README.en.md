@@ -58,6 +58,8 @@ pnpm pack --pack-destination /tmp
 dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-scripts
 ```
 
+When replacing `dsh-cross-session-agent`, remove it first with `dsh plugin --profile desktop remove dsh-cross-session-agent --config.ignore-scripts=true`, then install this package; the three tool names overlap. Preserve existing pair configuration and rename its patch entry from `cross-session-agent` to `agent-message`, leaving other profile settings intact.
+
 Installation registers the three tools, but **default cross-session authority is empty**. Configure full stable IDs in that profile's `cordis.patch.yml`:
 
 ```yaml
@@ -133,6 +135,8 @@ pnpm peers check
 ```
 
 `test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [0.2 validation report](./docs/validation-0.2.0-rc.2.md) for current evidence. The native runner uses a temporary profile, actual Agent/tool/log services and an offline deterministic model to verify references, handoffs, receipts, settings and restart budgets. It does not establish arbitrary online-model behavior.
+
+This fork replaced the other plugin in the installed DSH 0.2.0-rc.2 desktop. On the current online Flash route, native `@` and full Session ID requests each completed review → fix → reply → independent re-review. Both implementations went from 9 pass / 1 fail to 10 pass / 0 fail with unchanged acceptance files; all four relays were claimed and all ten peer-tool calls succeeded. Both reference-only controls made no sends and did not wake A. After sending remediation requirements, end the current turn so A's business reply can trigger the next review turn.
 
 ## Limitations
 

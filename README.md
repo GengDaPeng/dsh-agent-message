@@ -58,6 +58,8 @@ pnpm pack --pack-destination /tmp
 dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-scripts
 ```
 
+若替换 `dsh-cross-session-agent`，先用 `dsh plugin --profile desktop remove dsh-cross-session-agent --config.ignore-scripts=true` 卸载它，再安装本包；两者的三个工具名称重合。保留已有配对配置，将对应 patch 条目的 `id` 从 `cross-session-agent` 改为 `agent-message`，不要改其他 profile 设置。
+
 安装自注册三个工具，但**默认没有跨会话权限**。在该 profile 的 `cordis.patch.yml` 中配置真实会话的完整 ID：
 
 ```yaml
@@ -133,6 +135,8 @@ pnpm peers check
 ```
 
 `test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；当前 0.2 验收记录见 [`docs/validation-0.2.0-rc.2.md`](./docs/validation-0.2.0-rc.2.md)。`live-profile-e2e` 只创建和操作临时 profile，使用真实 Native Agent/工具/日志服务和无网络的确定性模型，验证原生引用、往返、回执、设置与重启预算；它不证明任意在线模型一定遵循提示词。
+
+本机 DSH 0.2.0-rc.2 已用本 fork 替换旧插件，并在当前在线 Flash 路由分别验证原生 `@` 与完整 Session ID 的审查→整改→回传→复审。两份初稿各从 9/1 变为 10/0，原验收文件未改，4 条往返消息全部被领取，10 次跨会话工具调用均成功；两种纯参考请求都没有发送消息或唤醒 A。发送整改要求后可结束当前轮次，由 A 的业务回传触发新的复审轮次。
 
 ## 限制
 
