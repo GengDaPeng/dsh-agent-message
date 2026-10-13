@@ -4,10 +4,12 @@ import test from 'node:test'
 
 const expectedFiles = [
   'LICENSE',
+  'NOTICE.md',
   'README.en.md',
   'README.md',
   'cordis.patch.yml',
   'docs/assets/message-header-navigation.jpg',
+  'docs/validation-0.2.0-rc.2.md',
   'lib/client.js',
   'lib/index.js',
   'package.json',

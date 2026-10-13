@@ -3,7 +3,8 @@ dist/
 *.log
 .DS_Store
 
-# Keep repository Markdown under docs/ limited to the active architecture contract.
+# Keep repository Markdown under docs/ limited to the active architecture and validation.
 docs/*.md
 docs/**/*.md
 !docs/architecture-v2.md
+!docs/validation-0.2.0-rc.2.md
