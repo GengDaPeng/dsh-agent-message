@@ -4,7 +4,7 @@
 >
 > 初稿：2026-08-14
 >
-> 本次修订：2026-10-13，DSH 0.2.0-rc.2
+> 本次修订：2026-10-18，DSH 0.2.1-rc.2
 >
 > 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的引用、消息投递与传输诊断。
 
@@ -36,7 +36,7 @@
 - 使用 `followup`、`steer` 或 `inject` 投递一条原生消息；
 - 在消息中保留发送方 Session，使接收方能按需回复；
 - 提供可选的传输状态查询；
-- 通过用户配置的稳定 Session 配对、相同 cwd 和有限原生日志消息预算限制通信；
+- 通过用户配置的稳定 Session 配对、分别相同且非空的原始项目 header.cwd 与当前 workingDirectory，以及有限原生日志消息预算限制通信；
 - 在 Plugin Client 中显示 relay 消息来源和发送方跳转入口。
 
 ### 2.2 当前不提供
@@ -122,7 +122,7 @@ A 根据用户完整句子判断动作：
 Host 负责：
 
 1. 从工具执行上下文派生真实 `senderSessionId`；
-2. 校验调用方和目标是用户配置的稳定 Session 配对、同非空 cwd、未归档且不是自身或真实子代理；
+2. 校验调用方和目标是用户配置的稳定 Session 配对、原始项目 header.cwd 和当前 workingDirectory 分别相同且非空、未归档且不是自身或真实子代理；
 3. 校验所选投递模式当前可用；
 4. 使用 Harness `createUserMessage()` 创建原生消息；
 5. 通过公开 Agent API 投递；
@@ -292,7 +292,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 它不能报告“已读”“已回复”或“已完成”。内存 Map 只能作为有界缓存，不能成为跨重启的稳定对象。
 
-0.2 的在线和离线回执统一读取公开 `sessionQuery.readSession`，按
+0.2 的在线和离线回执统一读取公开 `sessionQuery.observeSession`，按
 `inheritedEventCount` 排除 fork 继承的父 Inbox 前缀。内存发送表和原生消息来源
 都校验真实 sender/target，不能查询其他调用方的投递。异步查询、恢复 setup、
 发布 commit 和原生投递前均复查身份、归档、cwd 和取消信号。
@@ -356,7 +356,7 @@ rc.2 的非人类输入显示在 `data-turn-trigger` notice 中；只装饰匹�
 
 ## 14. 验证记录
 
-当前 0.2 补丁的验证和复现见 [validation-0.2.0-rc.2.md](validation-0.2.0-rc.2.md)。
+当前 0.2.1 补丁的验证和复现见 [validation-0.2.1-rc.2.md](validation-0.2.1-rc.2.md)。
 以下原记录对应 0.1.1-rc.2，是历史基线，不能替代当前版本验收。
 
 最小可重复验证：

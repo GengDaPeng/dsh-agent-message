@@ -8,3 +8,4 @@ docs/*.md
 docs/**/*.md
 !docs/architecture-v2.md
 !docs/validation-0.2.0-rc.2.md
+!docs/validation-0.2.1-rc.2.md

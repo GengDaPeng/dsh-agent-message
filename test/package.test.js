@@ -10,6 +10,7 @@ const expectedFiles = [
   'cordis.patch.yml',
   'docs/assets/message-header-navigation.jpg',
   'docs/validation-0.2.0-rc.2.md',
+  'docs/validation-0.2.1-rc.2.md',
   'lib/client.js',
   'lib/index.js',
   'package.json',

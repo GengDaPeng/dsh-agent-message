@@ -7,7 +7,7 @@ import { writeFile } from 'node:fs/promises'
 import { LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
 
 export const name = 'agent-message-agent-host-fixture'
-export const inject = ['llm', 'agents', 'tools', 'sessionQuery', 'sessionPersistence', 'workspaceRegistry', 'sessionReferenceResolver', 'settings']
+export const inject = ['llm', 'agents', 'tools', 'sessionQuery', 'sessionPersistence', 'sessionProjections', 'workingDirectory', 'workspaceRegistry', 'sessionReferenceResolver', 'settings']
 
 export function apply(ctx, config) {
   const { a, b, c, d, fork, cwd, otherCwd, runId, output, phase = 'initial' } = config
@@ -19,7 +19,7 @@ export function apply(ctx, config) {
     async *stream(options) {
       modelCalls++
       options.signal?.throwIfAborted()
-      const last = options.messages.findLast((message) => message.role !== 'system' && message.role !== 'developer' && message.source?.kind !== 'runtime-context' && message.source?.kind !== 'session-reference')
+      const last = options.messages.findLast((message) => message.role !== 'system' && message.role !== 'developer' && !['runtime-context', 'session-reference', 'working-directory'].includes(message.source?.kind))
       const body = last?.content?.filter((block) => block.type === 'text').map((block) => block.text).join('\n') ?? ''
       modelInputs.push({ role: last?.role, tail: body.slice(-60), roles: options.messages.map((message) => message.role) })
       let action
@@ -83,6 +83,15 @@ export function apply(ctx, config) {
         check('B existed only in native persistence before the first A to B send')
 
         const mention = '@[Fixture B](dsh-session:' + Buffer.from(JSON.stringify(b), 'utf8').toString('base64url') + ')'
+        const beforeReferences = (await read(b)).events.length
+        for (const text of [mention + '\nFIXTURE_REFERENCE_ONLY', b + '\nFIXTURE_REFERENCE_ONLY']) {
+          ha.agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+          await ha.agent.whenIdle()
+          assert.equal(ctx.agents.get(b), undefined)
+          assert.equal((await read(b)).events.length, beforeReferences)
+          assert.equal((await read(a)).events.filter((event) => event.type === 'tool/call' && event.data.name === 'send_agent_message').length, 0)
+        }
+        check('native @ and full-ID reference-only turns did not send, resume cold B or change B history with the deterministic provider')
         ha.agent.followup(createUserMessage({ content: [{ type: 'text', text: mention + '\nFIXTURE_START' }], source: { kind: 'user' } }))
         const deadline = Date.now() + 30_000
         let bSnapshot
@@ -109,9 +118,9 @@ export function apply(ctx, config) {
         }
         const combined = [...aSnapshot.events, ...bSnapshot.events]
         const callIds = new Set(combined.filter((event) => event.type === 'tool/call' && event.data.name === 'send_agent_message').map((event) => event.data.callId))
-        const dispatches = combined.filter((event) => event.type === 'tool/result' && callIds.has(event.data.message.source?.callId))
+        const dispatches = combined.filter((event) => event.type === 'tool/result' && callIds.has(event.data.message.toolCallId))
         assert.equal(dispatches.length, 3)
-        assert.ok(dispatches.every((event) => event.data.message.isError === false))
+        assert.ok(dispatches.every((event) => event.data.message.role === 'tool' && event.data.message.isError === false))
         check('real Agent loops and native tool dispatch completed A to cold B to A to B; B finished with FIXTURE_APPROVED and no further relay')
 
         const receipts = []
@@ -150,10 +159,30 @@ export function apply(ctx, config) {
         await assert.rejects(execute('check_delivery', { to: d, messageId: delivered[0].data.id }, ha.agent), /无权/)
         check('real workspace registry and native session directory denied cross-cwd and unpaired targets')
 
-        await create(fork, cwd, { seed: bSnapshot.events, inheritedEventCount: bSnapshot.events.length, meta: { cwd, parentSession: b, isSeeded: true } })
+        const forkHandle = await create(fork, cwd, { seed: bSnapshot.events, inheritedEventCount: bSnapshot.events.length, meta: { cwd, parentSession: b, isSeeded: true } })
         const bDelivery = delivered.find((event) => event.data.source.targetSessionId === b)
         assert.equal((await execute('check_delivery', { to: fork, messageId: bDelivery.data.id }, ha.agent)).entries[0].state, 'unknown')
         check('a real fork did not claim a receipt inherited from its parent')
+
+        const originalCwd = forkHandle.agent.session.header.cwd
+        const changedDirectory = await ctx.workingDirectory.set(forkHandle.agent, otherCwd)
+        assert.equal(forkHandle.agent.session.header.cwd, originalCwd)
+        assert.equal(ctx.sessionProjections.stateOf(forkHandle.agent.session, 'workingDirectory'), changedDirectory)
+        const relayCount = (snapshot) => snapshot.events.filter((event) => event.type === 'agent/inbox/spliced' && event.data.inserted.some((message) => message.source?.kind === 'dsh-agent-message')).length
+        const beforeDirectoryDenial = relayCount(await read(fork))
+        for (const cold of [false, true]) {
+          if (cold) {
+            await forkHandle.dispose()
+            handles.splice(handles.indexOf(forkHandle), 1)
+            assert.equal(ctx.agents.get(fork), undefined)
+          }
+          await assert.rejects(execute('send_agent_message', { to: fork, content: 'must not cross current directories' }, ha.agent), /无权/)
+          await assert.rejects(execute('check_delivery', { to: fork, messageId: bDelivery.data.id }, ha.agent), /无权/)
+          assert.deepEqual((await execute('list_peer_agents', {}, ha.agent)).map((row) => row.id), [b])
+          assert.equal(relayCount(await read(fork)), beforeDirectoryDenial)
+          if (cold) assert.equal(ctx.agents.get(fork), undefined)
+        }
+        check('public workingDirectory.set kept header.cwd stable; changed current directories denied live and genuinely cold sends, receipts and discovery without a relay or resume')
 
         const controller = new AbortController()
         controller.abort(new Error('fixture user stop'))

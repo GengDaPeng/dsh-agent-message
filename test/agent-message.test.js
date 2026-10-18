@@ -43,6 +43,16 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
       return { ...value, session: { cwd: '/tmp', ...value.session }, inheritedEventCount: value.inheritedEventCount ?? 0 }
     },
   }
+  query.observeSession = async (id) => {
+    const snapshot = await query.readSession(id)
+    return {
+      header: snapshot.session,
+      events: snapshot.events,
+      inheritedEventCount: snapshot.inheritedEventCount,
+      projections: { values: { workingDirectory: snapshot.workingDirectory ?? snapshot.session.cwd } },
+      [Symbol.dispose]() {},
+    }
+  }
   const tools = new Map()
   const listeners = new Map()
   const effects = []
@@ -57,6 +67,7 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
       if (name === 'workspaceRegistry') return services.workspaceRegistry ?? { archivedSessionIds: [] }
       if (name === 'sessionTitle') return services.sessionTitle ?? { get: (session) => ({ title: session.agentTitle ?? '发送者' }) }
       if (name === 'sessionQuery') return query
+      if (name === 'sessionProjections') return services.sessionProjections ?? { stateOf: (session) => session.workingDirectory ?? session.header.cwd }
       return services[name]
     },
     effect(factory) {
@@ -100,7 +111,7 @@ test('插件不注册全局提示，发送语义只存在于工具合同', () =>
   })
 
   assert.equal(sections, 0)
-  assert.deepEqual(inject, ['agents', 'tools', 'sessionQuery', 'workspaceRegistry'])
+  assert.deepEqual(inject, ['agents', 'tools', 'sessionQuery', 'sessionProjections', 'workspaceRegistry'])
 })
 
 test('默认 followup 允许 idle 会话并进入独立下一 turn', async () => {
@@ -340,6 +351,7 @@ test('会话列表使用 sessionQuery，保留普通 fork 并过滤真子代理�
       workspaceRegistry: { archivedSessionIds: ['session-archived'] },
       sessionQuery: {
         listSessions: async () => { listCalls += 1; return records },
+        readSession: async (id) => ({ session: records.find((record) => record.header.id === id).header, events: [] }),
         readTitleSnapshots: async (ids) => {
           titleIds = ids
           return ids.map((id) => ({

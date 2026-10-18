@@ -25,6 +25,7 @@ const allowedPairs = [
   { id: 'cross-workspace-probe', sessions: [ids.a, ids.c], maxMessages: 1 },
   { id: 'fork-probe', sessions: [ids.a, ids.fork], maxMessages: 1 },
 ]
+const redact = (text) => text.replace(/([?&]token=)[^\s&]+/g, '$1<redacted>')
 
 async function command(bin, args) {
   const child = spawn(bin, args, { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -46,6 +47,8 @@ async function stop(child) {
 }
 
 try {
+  const dshVersion = (await command(dsh, ['--version'])).trim()
+  assert.match(dshVersion, /0\.2\.1-rc\.2/, 'This candidate targets DSH 0.2.1-rc.2')
   const packed = JSON.parse(await command(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['pack', '--pack-destination', root, '--json']))
   const tarball = packed.filename ?? packed.tarballPath
   assert.equal(typeof tarball, 'string', 'pnpm pack must return its tarball path')
@@ -72,18 +75,18 @@ try {
       while (Date.now() < deadline) {
         if (spawnError) throw spawnError
         try { await access(outputs[index]); result = JSON.parse(await readFile(outputs[index], 'utf8')); break } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error }
-        if (child.exitCode !== null || child.signalCode !== null) throw new Error(`profile exited before acceptance\n${logs.slice(-10000)}`)
+        if (child.exitCode !== null || child.signalCode !== null) throw new Error(`profile exited before acceptance\n${redact(logs.slice(-10000))}`)
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
       }
-      assert.ok(result, `profile acceptance timed out\n${logs.slice(-10000)}`)
+      assert.ok(result, `profile acceptance timed out\n${redact(logs.slice(-10000))}`)
       assert.equal(result.ok, true, result.error)
       results.push(result)
     } finally {
       await stop(child)
-      await writeFile(join(root, phase + '.log'), logs)
+      await writeFile(join(root, phase + '.log'), redact(logs))
     }
   }
-  const report = { ok: true, dsh, node: process.versions.node, home, root, ids, runId, onlineModelRequests: false, results }
+  const report = { ok: true, dsh, dshVersion, node: process.versions.node, home, root, ids, runId, onlineModelRequests: false, results }
   await writeFile(join(root, 'acceptance.json'), JSON.stringify(report, null, 2) + '\n')
   process.stdout.write(JSON.stringify(report, null, 2) + '\n')
 } catch (error) {

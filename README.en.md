@@ -49,7 +49,7 @@ Current relay messages are displayed as visible Agent message cards; clicking th
 
 ## Install and authorize
 
-This branch targets **DSH 0.2.0-rc.2 and Node 24**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
+This branch targets **DSH 0.2.1-rc.2 and Node 24**. Other versions are not claimed as compatible. Before merge/publication, pack reviewed source and validate in a temporary `DSH_HOME`; this contribution publishes no npm release.
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -71,7 +71,7 @@ Installation registers the three tools, but **default cross-session authority is
         maxMessages: 20
 ```
 
-Members must be distinct, non-archived ordinary root/fork Sessions with identical nonempty cwd. The coordination id accepts 1–64 ASCII letters, digits, underscores or hyphens; pairs and ids must be unique. `maxMessages` is a bidirectional message count, not a fix-round count: default 20, range 1–100. Native Inbox logs retain the budget across restarts. A user configures a new id for a new task and removes the pair when done; agents cannot change configuration or reset budgets. Receiving Sessions keep their own Harness approvals and permissions.
+Members must be distinct, non-archived ordinary root/fork Sessions. Both their original project (`header.cwd`) and current `workingDirectory` must separately match and be nonempty. Current directories come from the public Harness projection; missing projections deny access. Changing different projects to the same directory does not grant new communication access. The coordination id accepts 1–64 ASCII letters, digits, underscores or hyphens; pairs and ids must be unique. `maxMessages` is a bidirectional message count, not a fix-round count: default 20, range 1–100. Native Inbox logs retain the budget across restarts. A user configures a new id for a new task and removes the pair when done; agents cannot change configuration or reset budgets. Receiving Sessions keep their own Harness approvals and permissions.
 
 The sidebar **… → Copy session ID** copies its own row's identity; the header button remains. Native mentions and copied IDs grant no messaging authority.
 
@@ -97,9 +97,9 @@ Delivery paths of `send_agent_message`:
 
 - **Ordinary online message**: find the target Agent through the `agents` registry and call `followup()` so it enters an independent `next-turn`;
 - **Running-mode semantics**: users do not need to name a mode. The Agent selects `steer()` when the full request clearly asks for immediate intervention, or `inject()` when it clearly asks to add context without interrupting the current task. The target must actually be `running`; when intent is unclear, the Agent keeps the default `followup()`;
-- **Ordinary offline message**: first read and validate one logical-session snapshot through `sessionQuery.readSession()`, then restore it through the public `agents.resume()` API and call `followup()`. The plugin retains and reuses the returned handle, keeps the target loaded after it becomes idle, and releases the handle only when the plugin unloads. Resume failures are returned directly; the plugin does not forge core Inbox events as a fallback note.
+- **Ordinary offline message**: first read and validate one logical-session snapshot through `sessionQuery.observeSession()`, then restore it through the public `agents.resume()` API and call `followup()`. The plugin retains and reuses the returned handle, keeps the target loaded after it becomes idle, and releases the handle only when the plugin unloads. Resume failures are returned directly; the plugin does not forge core Inbox events as a fallback note.
 
-Session enumeration, batched titles, and offline log reads use Harness's `sessionQuery.listSessions()`, `readTitleSnapshots()`, and `readSession()` respectively. `SessionId` is the only address; `parentSession` records fork lineage only, and only `origin: subagent` identifies an actual subagent. The plugin does not scan `sessionPersistence` directly to rebuild a parallel session directory.
+Session enumeration, batched titles, and offline log reads use Harness's `sessionQuery.listSessions()`, `readTitleSnapshots()`, and `observeSession()` respectively. `SessionId` is the only address; `parentSession` records fork lineage only, and only `origin: subagent` identifies an actual subagent. The plugin does not scan `sessionPersistence` directly to rebuild a parallel session directory.
 
 After `send_agent_message` submits the native message to the target Inbox, it immediately returns `accepted` with the native `messageId`; both the terse tool result and the full tool card show a selectable `messageId` for copying, while the complete result also stays in tool presentation metadata. `check_delivery` then derives `pending` (still queued), `claimed` (claimed by a turn), `discarded` (cancelled), or `unknown` from Inbox events on demand. `claimed` is transport evidence only: it does not prove that the message was read, answered, or completed. Pre-admission failure remains a Harness tool error and writes nothing to the target Inbox. Runtime state is reported separately as `targetRuntimeStatus`, so unrelated Agent activity never changes the message state. A known `messageId` remains queryable from the target Inbox log after a process restart.
 
@@ -134,9 +134,9 @@ node scripts/live-profile-e2e.mjs /path/to/dsh
 pnpm peers check
 ```
 
-`test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [0.2 validation report](./docs/validation-0.2.0-rc.2.md) for current evidence. The native runner uses a temporary profile, actual Agent/tool/log services and an offline deterministic model to verify references, handoffs, receipts, settings and restart budgets. It does not establish arbitrary online-model behavior.
+`test:web-smoke` requires a local `dsh` installation and a configured Web Profile. It checks startup, plugin composition, and HTTP reachability only; see the [0.2.1 validation report](./docs/validation-0.2.1-rc.2.md) for current evidence. The native runner uses a temporary profile, actual Agent/tool/log services and an offline deterministic model to verify references, handoffs, receipts, settings and restart budgets. It does not establish arbitrary online-model behavior.
 
-This fork replaced the other plugin in the installed DSH 0.2.0-rc.2 desktop. On the current online Flash route, native `@` and full Session ID requests each completed review → fix → reply → independent re-review. Both implementations went from 9 pass / 1 fail to 10 pass / 0 fail with unchanged acceptance files; all four relays were claimed and all ten peer-tool calls succeeded. Both reference-only controls made no sends and did not wake A. After sending remediation requirements, end the current turn so A's business reply can trigger the next review turn.
+Historical validation (DSH 0.2.0-rc.2, separate from the current 0.2.1 temporary-profile run): this fork replaced the other plugin in that desktop. On the current online Flash route, native `@` and full Session ID requests each completed review → fix → reply → independent re-review. Both implementations went from 9 pass / 1 fail to 10 pass / 0 fail with unchanged acceptance files; all four relays were claimed and all ten peer-tool calls succeeded. Both reference-only controls made no sends and did not wake A. After sending remediation requirements, end the current turn so A's business reply can trigger the next review turn.
 
 ## Limitations
 

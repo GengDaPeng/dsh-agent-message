@@ -31,6 +31,16 @@ function fixture({ pairs = [pair], cwdB = '/repo', existing, query: overrides = 
     async readTitle() { return undefined },
     ...overrides,
   }
+  query.observeSession ??= async (id) => {
+    const snapshot = await query.readSession(id)
+    return {
+      header: snapshot.session,
+      events: snapshot.events,
+      inheritedEventCount: snapshot.inheritedEventCount,
+      projections: { values: { workingDirectory: snapshot.workingDirectory ?? snapshot.session.cwd } },
+      [Symbol.dispose]() {},
+    }
+  }
   const ctx = {
     agents: {
       get: (id) => state.live.get(id), list: () => [...state.live.values()],
@@ -40,7 +50,7 @@ function fixture({ pairs = [pair], cwdB = '/repo', existing, query: overrides = 
       },
     },
     tools: { register: (tool) => tools.set(tool.name, tool) },
-    get(name) { return { sessionQuery: query, workspaceRegistry: state.workspace }[name] },
+    get(name) { return { sessionQuery: query, workspaceRegistry: state.workspace, sessionProjections: { stateOf: (session) => session.workingDirectory ?? session.header.cwd } }[name] },
     effect(fn) { cleanups.push(fn()); }, on() {},
   }
   apply(ctx, { allowedPairs: pairs })
@@ -76,6 +86,85 @@ test('an explicit pair still cannot cross working directories, including cold ta
     await assert.rejects(f.tools.get('check_delivery').execute({ to: 'session-b', messageId: 'anything' }, { agent: f.a }), /无权/)
     assert.equal(f.resumes, 0)
   }
+})
+
+test('same original project does not authorize different current directories for live or cold targets', async () => {
+  for (const cold of [false, true]) {
+    const f = fixture()
+    f.state.live.get('session-b').session.workingDirectory = '/moved'
+    f.state.snapshots.get('session-b').workingDirectory = '/moved'
+    if (cold) f.state.live.delete('session-b')
+    assert.deepEqual(await f.tools.get('list_peer_agents').execute({}, { agent: f.a }), [])
+    await assert.rejects(send(f), /无权/)
+    await assert.rejects(f.tools.get('check_delivery').execute({ to: 'session-b' }, { agent: f.a }), /无权/)
+    assert.equal(f.resumes, 0)
+    assert.equal(f.state.snapshots.get('session-b').events.length, 0)
+  }
+})
+
+test('matching current directories do not broaden the original project boundary', async () => {
+  const f = fixture({ cwdB: '/other' })
+  f.state.live.get('session-b').session.workingDirectory = '/repo'
+  f.state.snapshots.get('session-b').workingDirectory = '/repo'
+  await assert.rejects(send(f), /无权/)
+  assert.deepEqual(await f.tools.get('list_peer_agents').execute({}, { agent: f.a }), [])
+})
+
+test('missing live or observed working-directory projections deny access and release observations', async () => {
+  for (const missing of ['registry', 'caller', 'target', 'observation']) {
+    let disposed = 0
+    const f = fixture({ query: { async observeSession(id) {
+      const snapshot = f.state.snapshots.get(id)
+      return { header: snapshot.session, events: snapshot.events, inheritedEventCount: 0,
+        ...(missing === 'observation' && id === 'session-b' ? {} : { projections: { values: { workingDirectory: snapshot.session.cwd } } }),
+        [Symbol.dispose]() { disposed++ },
+      }
+    } } })
+    const get = f.ctx.get
+    f.ctx.get = (name) => name === 'sessionProjections' ? missing === 'registry' ? undefined : {
+      stateOf(session) { return session.header.id === (missing === 'caller' ? 'session-a' : missing === 'target' ? 'session-b' : '') ? undefined : session.header.cwd },
+    } : get(name)
+    await assert.rejects(send(f), /无权/)
+    assert.equal(f.state.snapshots.get('session-b').events.length, 0)
+    if (missing === 'observation') assert.equal(disposed, 2)
+  }
+})
+
+test('directory changes during cold observation or resume cannot deliver a stale authorized snapshot', async () => {
+  for (const boundary of ['observation', 'resume']) {
+    for (const member of ['session-a', 'session-b']) {
+      const started = Promise.withResolvers()
+      const release = Promise.withResolvers()
+      let target
+      let disposals = 0
+      let f
+      f = fixture({
+        query: { async readSession(id) {
+          const snapshot = structuredClone(f.state.snapshots.get(id))
+          if (boundary === 'observation' && id === 'session-b') { started.resolve(); await release.promise }
+          return snapshot
+        } },
+        async resume() { started.resolve(); await release.promise; return { agent: target, async dispose() { disposals++ } } },
+      })
+      target = f.state.live.get('session-b')
+      f.state.live.delete('session-b')
+      const pending = send(f)
+      await started.promise
+      const changed = member === 'session-a' ? f.a : target
+      changed.session.workingDirectory = '/moved'
+      f.state.snapshots.get(member).workingDirectory = '/moved'
+      release.resolve()
+      await assert.rejects(pending, /无权/)
+      assert.equal(f.state.snapshots.get('session-b').events.length, 0)
+      assert.equal(disposals, boundary === 'resume' || member === 'session-b' ? 1 : 0)
+    }
+  }
+})
+
+test('listing rechecks the caller directory after asynchronous title reads', async () => {
+  let f
+  f = fixture({ query: { async readTitleSnapshots() { f.a.session.workingDirectory = '/moved'; return [] } } })
+  assert.deepEqual(await f.tools.get('list_peer_agents').execute({}, { agent: f.a }), [])
 })
 
 test('missing archive service fails closed instead of assuming every session is unarchived', async () => {

@@ -49,7 +49,7 @@
 
 ## 安装与授权配置
 
-本分支适配 **DSH 0.2.0-rc.2、Node 24**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
+本分支适配 **DSH 0.2.1-rc.2、Node 24**，其他版本没有兼容性声明。合并发布前，应从审核的源码打包，并先在临时 `DSH_HOME` 验证；本次未发布 npm 包。
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -71,7 +71,7 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
         maxMessages: 20
 ```
 
-两个会话必须是不同、未归档、同非空工作目录的普通 root/fork。`id` 允许 1–64 个英文字母、数字、下划线或连字符；配对和协作 id 必须唯一。`maxMessages` 是双向消息总数，默认 20，范围 1–100，不是整改轮次。预算由两条会话自己的原生 Inbox 日志计算，重启不会清零。新任务由用户配置新 id，任务结束时移除配对；模型不能改配置或重置预算。接收方保留自己的 Harness 工具审批与权限。
+两个会话必须是不同、未归档的普通 root/fork，且原始项目 `header.cwd` 与当前 `workingDirectory` 均须分别相同、非空。当前目录从 Harness 的公开投影读取；缺失投影时关闭权限。仅把不同项目切到同一目录不会新增通信权限。`id` 允许 1–64 个英文字母、数字、下划线或连字符；配对和协作 id 必须唯一。`maxMessages` 是双向消息总数，默认 20，范围 1–100，不是整改轮次。预算由两条会话自己的原生 Inbox 日志计算，重启不会清零。新任务由用户配置新 id，任务结束时移除配对；模型不能改配置或重置预算。接收方保留自己的 Harness 工具审批与权限。
 
 侧栏“…”→“复制会话 ID”复制该行的 ID，会话顶部也保留复制按钮。原生 `@` 或复制 ID 都不授予通信权限。
 
@@ -97,9 +97,9 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
 
 - **在线普通消息**：通过 `agents` 注册表找到目标 Agent，调用 `followup()` 进入独立的 `next-turn`；
 - **运行中高级语义**：用户无需说出模式名；Agent 根据整句话判断，明确要求立即介入时使用 `steer()`，明确要求不打断当前任务、只补充上下文时使用 `inject()`；目标必须确实为 `running`，判断不清时仍使用默认 `followup()`；
-- **离线普通消息**：先由 `sessionQuery.readSession()` 读取同一份逻辑会话快照并校验目标，再通过公开 `agents.resume()` 恢复、调用 `followup()`；插件持有并复用恢复得到的 handle，目标回到 idle 后仍保持加载，只在插件卸载时释放。恢复失败直接返回失败，不伪造核心 Inbox 事件作为留言。
+- **离线普通消息**：先由 `sessionQuery.observeSession()` 读取同一份逻辑会话快照并校验目标，再通过公开 `agents.resume()` 恢复、调用 `followup()`；插件持有并复用恢复得到的 handle，目标回到 idle 后仍保持加载，只在插件卸载时释放。恢复失败直接返回失败，不伪造核心 Inbox 事件作为留言。
 
-会话枚举、批量标题和离线日志读取分别使用 Harness 的 `sessionQuery.listSessions()`、`readTitleSnapshots()` 与 `readSession()`。`SessionId` 是唯一地址；`parentSession` 只记录分叉血缘，只有 `origin: subagent` 才会被识别为真实子代理。插件不直接扫描 `sessionPersistence` 重建另一份会话目录。
+会话枚举、批量标题和离线日志读取分别使用 Harness 的 `sessionQuery.listSessions()`、`readTitleSnapshots()` 与 `observeSession()`。观察切面同时提供当前工作目录和原生日志，读取后释放 lease。`SessionId` 是唯一地址；`parentSession` 只记录分叉血缘，只有 `origin: subagent` 才会被识别为真实子代理。插件不直接扫描 `sessionPersistence` 重建另一份会话目录。
 
 `send_agent_message` 成功把原生消息提交给目标 Inbox 后立即返回 `accepted` 和该消息的原生 `messageId`；精简工具结果和完整工具卡片都会显示可选择复制的 `messageId`，完整结果同时保留在工具呈现元数据中。`check_delivery` 根据 Inbox 事件按需返回 `pending`（仍在排队）、`claimed`（已被某轮认领）、`discarded`（被取消）或 `unknown`。`claimed` 只是传输证据，不表示已读、回复或任务完成。接纳前失败由 Harness 工具错误表示，不写入目标 Inbox。目标是否正在运行通过独立的 `targetRuntimeStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时可从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
 
@@ -134,9 +134,9 @@ node scripts/live-profile-e2e.mjs /path/to/dsh
 pnpm peers check
 ```
 
-`test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；当前 0.2 验收记录见 [`docs/validation-0.2.0-rc.2.md`](./docs/validation-0.2.0-rc.2.md)。`live-profile-e2e` 只创建和操作临时 profile，使用真实 Native Agent/工具/日志服务和无网络的确定性模型，验证原生引用、往返、回执、设置与重启预算；它不证明任意在线模型一定遵循提示词。
+`test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；当前 0.2.1 验收记录见 [`docs/validation-0.2.1-rc.2.md`](./docs/validation-0.2.1-rc.2.md)。`live-profile-e2e` 只创建和操作临时 profile，使用真实 Native Agent/工具/日志服务和无网络的确定性模型，验证原生引用、往返、回执、设置与重启预算；它不证明任意在线模型一定遵循提示词。
 
-本机 DSH 0.2.0-rc.2 已用本 fork 替换旧插件，并在当前在线 Flash 路由分别验证原生 `@` 与完整 Session ID 的审查→整改→回传→复审。两份初稿各从 9/1 变为 10/0，原验收文件未改，4 条往返消息全部被领取，10 次跨会话工具调用均成功；两种纯参考请求都没有发送消息或唤醒 A。发送整改要求后可结束当前轮次，由 A 的业务回传触发新的复审轮次。
+历史验证（DSH 0.2.0-rc.2，与本次 0.2.1 临时 profile 验收分开记录）：本机曾用本 fork 替换旧插件，并在当前在线 Flash 路由分别验证原生 `@` 与完整 Session ID 的审查→整改→回传→复审。两份初稿各从 9/1 变为 10/0，原验收文件未改，4 条往返消息全部被领取，10 次跨会话工具调用均成功；两种纯参考请求都没有发送消息或唤醒 A。发送整改要求后可结束当前轮次，由 A 的业务回传触发新的复审轮次。
 
 ## 限制
 
