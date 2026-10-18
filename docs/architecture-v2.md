@@ -297,7 +297,12 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 消息卡片和可点击来源是用户体验层，不是协议层。
 
-当前 Plugin Client 使用 `MutationObserver` 查找 Harness 已渲染的 relay 消息节点、展开折叠行、隐藏模型可见协议首行并增加发送方样式。这些操作：
+从 Harness `0.2.1-rc.2` 起，relay 的两种落点都由原生 Client 渲染，Plugin Client 只做叠加增强：
+
+- **context 行**：原生按 `source.form === "relay"` + `source.senderSessionId` 渲染 `[data-context-form="relay"]`、`[data-context-relay-sender]`、`[data-context-text]`。
+- **turn-trigger 行**：默认 `followup` 投递会开启新 turn，原生把它渲染为 `[data-turn-trigger="true"]` 的“收到执行请求”行；正文在展开后才挂载 `[data-context-text]`，原生不显示发送方。
+
+插件在这两条路径上都只做三件增强：从正文中隐藏模型寻址用的 `<dsh-agent-message>` 协议首行、把发送方 Session ID 解析为标题并补出 `来自会话 · <名称>:` 行、提供可点击/键盘可达的会话跳转（`ctx.uiWorkspace.openSession`）。这些操作：
 
 - 只改变浏览器中的显示，不修改 Session log 和模型上下文；
 - 依赖当前 Harness DOM 结构，Harness 改版后可能失效；
@@ -306,14 +311,16 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 `MutationObserver` 只处理新增或移除的局部子树；Session 状态变化只刷新插件已经识别的 relay 发送方链接，不重新扫描整个 `document.body`。
 
-这里所说的“兼容层”不是功能无效，而是 Harness 当前没有给外部插件开放稳定的核心 user/message renderer 替换接口。未来出现官方 renderer seam 时再迁移；在此之前不为它额外建立 UI 框架。
+这里所说的“兼容层”不是功能无效，而是 Harness 当前没有给外部插件开放稳定的核心 user/message renderer 替换接口。未来出现官方 renderer seam 时再迁移；在此之前不为它额外建立 UI 框架。0.2.1 的 relay 渲染即属于这类 seam 的一次前进：插件放弃了自绘卡片，改为叠加增强。
 
 ## 12. 依赖与降级
 
 | 侧 | 必需服务 | 缺失时行为 |
 |---|---|---|
 | Host | `agents`、`tools`、`sessionQuery` | 插件不加载，不自行扫描日志或仿造运行时 |
-| Client | runtime、sessions、locale、conversation、settings、UI slots | Client 扩展不加载；Host 工具仍可工作 |
+| Client | `slots`、`timer`、`sessions`、`uiWorkspace`、`locale` | Client 扩展不加载；Host 工具仍可工作 |
+
+Host 端插件配置使用 Cordis `Config` 的 `.volatile()` 字段，由 Harness Settings 自动生成表单并原地更新配置引用，插件不再依赖 `dsh-settings` 的注册 API。Client 侧 `uiWorkspace` 只用于把发送方 Session ID 导航到前台；服务缺失时跳转静默降级，不影响投递与回执。
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
@@ -344,11 +351,14 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 ```sh
 pnpm test
+node scripts/verify-0.2.mjs
+node scripts/verify-0.2.mjs --with-headless   # 一次模型调用
+node scripts/verify-0.2-web.mjs
 pnpm run test:web-smoke
 pnpm peers check
 ```
 
-`test:web-smoke` 启动当前 Web Profile，验证组合中只有一份 Harness 原生 `ui-reference` 与本插件，并检查首页 HTTP 200；它不替代真实浏览器交互。
+`test:web-smoke` 启动当前 Web Profile，验证组合中只有一份 Harness 原生 `ui-reference` 与本插件，并检查首页 HTTP 200；它不替代真实浏览器交互。`scripts/verify-0.2.mjs` / `verify-0.2-web.mjs` 用本机捆绑的 `dsh` CLI 在 `dsh-msg-*` 临时 profile 里安装当前 checkout 做真机校验，不触碰既有 profile。
 
 2026-08-31 在 Harness `0.1.1-rc.2` 上使用两个 `DeepSeek-V4-Flash + Low` 会话完成真实浏览器冒烟：
 
@@ -356,3 +366,10 @@ pnpm peers check
 - A 通过插件发送唯一验证串，B 原样回传，双向 relay 卡片均正确显示；
 - 发送方跳转、复制 Session ID、设置开关与重置、跟随 Harness locale 均通过；
 - 模型可见的来源协议头在界面中隐藏，仅作为持久 source 的回复寻址投影。
+
+2026-10-19 在 Harness `0.2.1-rc.2` 上完成 0.2.x 兼容移植与真机验证（Node.js `24.x`）：
+
+- `pnpm test` 51/51 通过；`--dump-config` 组合出 `dsh-agent-message` bundle，失败模式行 0；
+- 真机 headless 会话中 `list_peer_agents` 返回 14 条 `session-` 会话，`send_agent_message` 可投递；
+- 端到端投递：A `session-b9dd6194…` → 离线 B `session-feb23767…`（`messageId b0778001…`）。B 的持久日志出现 `agent/inbox/spliced`（`next-turn`）与 `user/message`，`source = { kind: "dsh-agent-message", form: "relay", senderSessionId: A }`，正文以 `<dsh-agent-message>{"senderSessionId":…}</dsh-agent-message>` 开头；B 被自动 resume 并完成该 turn；
+- Web 真机：`plugins/??dsh-agent-message/client.js&rev=…` 返回 200 且含 `dsh-agent-message-client`，启动无 client 加载错误；真实浏览器中确认 client 半区 `apply` 生效（注入样式表存在）、`conversation.session.header.actions` 的「复制ID」按钮渲染、turn-trigger relay 行展开后被标记 `data-agent-msg-relay-card`、协议首行被剥离、`来自会话 · <标题>:` 发送方行生成且点击后主视图切换到发送方会话；client Inspect 服务目录确认 `slots`、`timer`、`sessions`、`uiWorkspace`、`locale` 五个注入服务均存在。

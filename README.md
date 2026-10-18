@@ -26,15 +26,15 @@
 | `send_agent_message` | 给指定会话 ID 发消息；默认使用 `followup` 创建独立的新 turn，离线时自动恢复后投递；显式支持 `followup`、`inject`、`steer` |
 | `check_delivery` | 按需查询消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
 | Harness 原生 `@` 会话引用 | 直接复用 Harness 的结构化 Session Reference；选择后当前 Agent 获得稳定 Session ID 和一份有界、只读、标记为不可信的会话快照。引用本身不会发送消息或唤醒目标 |
-| 可见的 Agent 消息卡片 | relay 仍保留真实的插件来源，但 Client 将它显示为左侧 Agent 消息卡片；`From Session · <名称>:` 可点击或通过键盘打开发送方会话，文案跟随 Harness 语言设置 |
+| 可见的 Agent 消息来源 | relay 仍保留真实的插件来源；Harness 0.2.x 把它渲染成引发新 turn 的「收到执行请求」行，插件在该行展开后补出可点击的 `来自会话 · <名称>:` 发送方行，并隐藏模型寻址用的协议首行，文案跟随 Harness 语言设置 |
 | 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
-| 投递卡片设置 | 在设置 → 插件配置中，可切换是否显示投递模式和目标运行状态；`messageId` 始终显示 |
+| 投递卡片设置 | Host 端声明 `Config` 的 `.volatile()` 字段，Harness 在设置 → 插件中据此自动生成表单；可切换是否显示投递模式和目标运行状态，`messageId` 始终显示 |
 
 ### 发送方导航示例
 
 ![可点击的发送者消息头示例](./docs/assets/message-header-navigation.jpg)
 
-当前 relay 消息显示为可见的 Agent 消息卡片；点击消息头即可跳转到发送方会话。持久化来源仍是插件 `relay`，不会伪装成人类输入。完整会话 ID 同时保留在 typed source 和 Host 生成的模型可见协议头中，避免接收 Agent 猜测发送方。
+当前 relay 消息由 Harness 原生渲染（0.2.x 是引发新 turn 的请求行），插件在展开后补出「来自会话 · <名称>:」发送方行；点击或键盘激活即可跳转到发送方会话。持久化来源仍是插件 `relay`，不会伪装成人类输入。完整会话 ID 同时保留在 typed source 和 Host 生成的模型可见协议头中，避免接收 Agent 猜测发送方。
 
 ### 投递模式（`send_agent_message` 的 `mode` 参数）
 
@@ -132,11 +132,13 @@ dsh-agent-message/
 
 ```sh
 pnpm test
+node scripts/verify-0.2.mjs          # 真机：临时 profile 安装 + --dump-config 组合校验（无模型调用）
+node scripts/verify-0.2.mjs --with-headless   # 追加一次真实会话，验证工具注册可用
 pnpm run test:web-smoke
 pnpm peers check
 ```
 
-`test:web-smoke` 需要本机已安装 `dsh` 并配置 Web Profile，它只验证启动、插件组合和 HTTP 可达性；真实交互验收记录见 [`docs/architecture-v2.md`](./docs/architecture-v2.md#14-验证记录)。
+`pnpm test` 覆盖 Host/Client 合同与源码边界。`verify-0.2.mjs` 通过本机捆绑的 `dsh` CLI 在临时 profile（`dsh-msg-*`，不触碰既有 profile）里安装当前仓库并做真机校验，`--with-headless` 会消耗一次模型调用。`test:web-smoke` 需要本机 `dsh` 已在 PATH 且配置 Web Profile。真实交互验收记录见 [`docs/architecture-v2.md`](./docs/architecture-v2.md#14-验证记录)。
 
 ## 限制
 

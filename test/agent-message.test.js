@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply, inject } from '../lib/index.js'
+import { apply, inject, Config } from '../lib/index.js'
 
 /**
  * 会话替身，按当前宿主合同区分「自有事件」与「继承前缀」。
@@ -79,18 +79,6 @@ function setup({ agents: initialAgents = [], services = {}, config = {} } = {}) 
     },
     on: (name, listener) => listeners.set(name, listener),
   }
-  if (services.settings !== undefined) {
-    ctx.inject = (_deps, callback) => callback({
-      settings: services.settings,
-      effect(factory) {
-        const cleanup = factory()
-        if (typeof cleanup !== 'function') return cleanup
-        const dispose = async () => cleanup()
-        effects.push(dispose)
-        return dispose
-      },
-    })
-  }
   apply(ctx, config)
   return {
     tools,
@@ -119,25 +107,14 @@ test('插件不注册全局提示，发送语义只存在于工具合同', () =>
   assert.deepEqual(inject, ['agents', 'tools', 'sessionQuery'])
 })
 
-test('设置卡片配置只收窄投递细节，始终保留 messageId', async () => {
-  let value = { showTechnicalDetails: true }
-  const watchers = new Set()
-  const settings = {
-    register(namespace, _schema, options) {
-      assert.equal(String(namespace), 'agent-message')
-      assert.deepEqual(options.base, { showTechnicalDetails: true })
-      return {
-        get: () => value,
-        watch(listener) {
-          watchers.add(listener)
-          return () => watchers.delete(listener)
-        },
-      }
-    },
-  }
+test('Host Config 的 volatile 字段只收窄投递细节，始终保留 messageId', async () => {
+  assert.equal(Config.dict.showTechnicalDetails.meta.volatile, true)
+  assert.equal(Config.dict.showTechnicalDetails.meta.default, true)
+
   const sender = liveAgent('session-sender')
   const target = liveAgent('session-target')
-  const { tools } = setup({ agents: [sender, target], services: { settings } })
+  const config = { showTechnicalDetails: true }
+  const { tools } = setup({ agents: [sender, target], config })
   const send = tools.get('send_agent_message')
   const args = { to: 'session-target', content: '新请求' }
   const result = await send.execute(args, { agent: sender })
@@ -145,11 +122,22 @@ test('设置卡片配置只收窄投递细节，始终保留 messageId', async (
   assert.match(detailed.content[0].text, /messageId: /)
   assert.match(detailed.content[0].text, /"mode":"followup"/)
 
-  value = { showTechnicalDetails: false }
-  for (const watcher of watchers) watcher()
+  // 0.2.1 的 Loader 通过 updateVolatile 原地更新 apply 收到的 config 引用。
+  config.showTechnicalDetails = false
   const compact = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
   assert.match(compact.content[0].text, /messageId: /)
   assert.doesNotMatch(compact.content[0].text, /"mode":"followup"/)
+})
+
+test('未传 Config 时保持默认：展示投递细节', async () => {
+  const sender = liveAgent('session-sender')
+  const target = liveAgent('session-target')
+  const { tools } = setup({ agents: [sender, target] })
+  const send = tools.get('send_agent_message')
+  const args = { to: 'session-target', content: '新请求' }
+  const result = await send.execute(args, { agent: sender })
+  const card = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
+  assert.match(card.content[0].text, /"mode":"followup"/)
 })
 
 test('默认 followup 允许 idle 会话并进入独立下一 turn', async () => {
