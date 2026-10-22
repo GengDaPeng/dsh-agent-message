@@ -27,7 +27,7 @@
 | `check_delivery` | 按需查询消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
 | Harness 原生 `@` 会话引用 | 直接复用 Harness 的结构化 Session Reference；选择后当前 Agent 获得稳定 Session ID 和一份有界、只读、标记为不可信的会话快照。引用本身不会发送消息或唤醒目标 |
 | 可见的 Agent 消息卡片 | relay 仍保留真实的插件来源，但 Client 将它显示为左侧 Agent 消息卡片；`From Session · <名称>:` 可点击或通过键盘打开发送方会话，文案跟随 Harness 语言设置 |
-| 复制会话 ID | 会话顶部和侧栏“…”菜单复制完整稳定 ID；侧栏复制对应行，无需打开它 |
+| 复制会话 ID | 会话顶部和侧栏“…”菜单复制完整稳定 ID；侧栏优先使用原生入口，旧版由插件补齐，复制对应行无需打开它 |
 | 投递卡片设置 | 在插件页面中，可切换是否显示投递模式和目标运行状态细节；`messageId` 始终显示 |
 
 ### 发送方导航示例
@@ -73,7 +73,7 @@ dsh plugin --profile desktop add /path/to/packed/dsh-agent-message.tgz --ignore-
 
 两个会话必须是不同、未归档的普通 root/fork，且原始项目 `header.cwd` 与当前 `workingDirectory` 均须分别相同、非空。当前目录从 Harness 的公开投影读取；缺失投影时关闭权限。仅把不同项目切到同一目录不会新增通信权限。`id` 允许 1–64 个英文字母、数字、下划线或连字符；配对和协作 id 必须唯一。`maxMessages` 是双向消息总数，默认 20，范围 1–100，不是整改轮次。预算由两条会话自己的原生 Inbox 日志计算，重启不会清零。新任务由用户配置新 id，任务结束时移除配对；模型不能改配置或重置预算。接收方保留自己的 Harness 工具审批与权限。
 
-侧栏“…”→“复制会话 ID”复制该行的 ID，会话顶部也保留复制按钮。原生 `@` 或复制 ID 都不授予通信权限。
+侧栏“…”菜单复制该行的 ID，无需打开会话。检测到 Harness 原生“复制 Session ID”入口时，插件不再重复注册；原生入口尚未注册或被卸载时，插件提供“复制会话 ID”。会话顶部仍保留复制按钮。原生 `@` 或复制 ID 都不授予通信权限。
 
 投递显示设置迁移为本插件 Config 的 volatile `showTechnicalDetails`，由 `configForms` 展示在插件页面；修改显示字段不会重挂通信工具，也不会在该表单中暴露 `allowedPairs`。`messageId` 始终保留。
 

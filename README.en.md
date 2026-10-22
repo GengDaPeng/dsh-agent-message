@@ -27,7 +27,7 @@ Typical scenarios: an orchestrator Agent dispatching work to a developer Agent, 
 | `check_delivery` | Query receipts on demand (pending/claimed/discarded/unknown); a successful send first returns accepted, while pre-admission failure is a tool error; explicit message ids remain queryable after restart |
 | Native Harness `@` session reference | Reuse Harness's structured Session Reference directly. The current Agent receives the stable Session ID plus a bounded, read-only snapshot marked as untrusted. Referencing alone does not send a message or wake the target |
 | Visible Agent message card | Relay keeps its true plugin provenance while the Client presents it as a left-aligned Agent message card; `From Session · <name>:` opens the sender by click or keyboard, with labels following the Harness language setting |
-| Copy session id | The header and sidebar … menu copy stable Session IDs; the menu copies its own row without opening it |
+| Copy session id | The header and sidebar … menu copy stable Session IDs; the sidebar uses the native action when available and a plugin fallback on older hosts, without opening the row |
 | Delivery card settings | In the plugin page, toggle delivery mode and target runtime details; `messageId` is always shown |
 
 ### Sender navigation example
@@ -73,7 +73,7 @@ Installation registers the three tools, but **default cross-session authority is
 
 Members must be distinct, non-archived ordinary root/fork Sessions. Both their original project (`header.cwd`) and current `workingDirectory` must separately match and be nonempty. Current directories come from the public Harness projection; missing projections deny access. Changing different projects to the same directory does not grant new communication access. The coordination id accepts 1–64 ASCII letters, digits, underscores or hyphens; pairs and ids must be unique. `maxMessages` is a bidirectional message count, not a fix-round count: default 20, range 1–100. Native Inbox logs retain the budget across restarts. A user configures a new id for a new task and removes the pair when done; agents cannot change configuration or reset budgets. Receiving Sessions keep their own Harness approvals and permissions.
 
-The sidebar **… → Copy session ID** copies its own row's identity; the header button remains. Native mentions and copied IDs grant no messaging authority.
+The sidebar **…** menu copies its own row's identity without opening the session. When Harness registers its native **Copy Session ID** action, the plugin skips its duplicate; while the native action is absent or unloaded, the plugin provides **Copy session ID**. The header button remains. Native mentions and copied IDs grant no messaging authority.
 
 Delivery display preferences now use volatile `showTechnicalDetails` in the plugin's Config, with a `configForms` page. Editing this field does not remount communication tools or expose `allowedPairs` in that form. The messageId always remains visible.
 
