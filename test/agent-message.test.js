@@ -25,6 +25,12 @@ function spliced(target, inserted, removedCount = 0) {
   return { type: 'agent/inbox/spliced', data: { target, start: 0, ...(removedCount > 0 ? { removedCount } : {}), inserted } }
 }
 
+function relayMessage(id, from, to) {
+  const source = { form: 'relay', senderSessionId: from }
+  if (to === undefined) return { id, source: { ...source, kind: 'plugin', plugin: 'dsh-agent-message' } }
+  return { id, source: { ...source, kind: 'dsh-agent-message', targetSessionId: to } }
+}
+
 function liveAgent(id, title = id, session = makeSession()) {
   const nextTurn = []
   const nextStep = []
@@ -113,7 +119,7 @@ test('Host Config 的 volatile 字段只收窄投递细节，始终保留 messag
 
   const sender = liveAgent('session-sender')
   const target = liveAgent('session-target')
-  const config = { showTechnicalDetails: true }
+  const config = Config({ showTechnicalDetails: true })
   const { tools } = setup({ agents: [sender, target], config })
   const send = tools.get('send_agent_message')
   const args = { to: 'session-target', content: '新请求' }
@@ -122,11 +128,11 @@ test('Host Config 的 volatile 字段只收窄投递细节，始终保留 messag
   assert.match(detailed.content[0].text, /messageId: /)
   assert.match(detailed.content[0].text, /"mode":"followup"/)
 
-  // 0.2.x 的 Loader 通过 updateVolatile 原地更新 apply 收到的 config 引用（0.2.2-rc.1 复核仍成立）。
-  config.showTechnicalDetails = false
+  config.showTechnicalDetails = Config({ showTechnicalDetails: false }).showTechnicalDetails
   const compact = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
+  assert.match(compact.content[0].text, /已接受投递/)
   assert.match(compact.content[0].text, /messageId: /)
-  assert.doesNotMatch(compact.content[0].text, /"mode":"followup"/)
+  assert.doesNotMatch(compact.content[0].text, /followup|targetRuntimeStatus/)
 })
 
 test('未传 Config 时保持默认：展示投递细节', async () => {
@@ -146,17 +152,10 @@ test('默认 followup 允许 idle 会话并进入独立下一 turn', async () =>
   const { tools } = setup({ agents: [sender, target] })
   const send = tools.get('send_agent_message')
 
-  assert.match(send.description, /当前请求或用户已授予的编排职责/)
-  assert.match(send.description, /@session.*只提供目标.*不代表发送/)
-  assert.doesNotMatch(send.description, /读取、搜索、分析、比较|意图不明确时先询问/)
-  assert.match(send.description, /正文明确要求.*发送方.*才.*回复/)
-  assert.match(send.description, /不要.*transport ack.*“收到”/)
-  assert.match(send.description, /立即介入.*steer/)
-  assert.match(send.description, /不打断.*补充.*inject/)
-  assert.match(send.description, /不确定.*followup/)
-  assert.match(send.description, /无需.*模式名/)
-  assert.doesNotMatch(send.description, /replyPolicy|结果留在目标会话|普通回复/)
-  assert.match(send.parameters.properties.content.description, /不要自行追加.*“收到”/)
+  assert.match(send.description, /用户明确要求发送.*已授权的协作/)
+  assert.match(send.description, /仅查看 @会话 引用时.*快照/)
+  assert.match(send.description, /明确要求回传业务结果.*已有授权范围.*senderSessionId 回复/)
+  assert.match(send.parameters.properties.content.description, /已授权的协作可自行撰写/)
 
   const result = await send.execute(
     { to: 'session-target', content: '新请求' },
@@ -170,7 +169,7 @@ test('默认 followup 允许 idle 会话并进入独立下一 turn', async () =>
   assert.match(result.text, /不表示.*已读.*回复.*完成/)
   assert.doesNotMatch(result.text, /结果默认留在目标会话/)
   const args = { to: 'session-target', content: '新请求' }
-  assert.deepEqual(send.output.render(args, result), [{ type: 'text', text: '已投递。\nmessageId: ' + result.messageId }])
+  assert.deepEqual(send.output.render(args, result), [{ type: 'text', text: '目标收件箱已接纳。\nmessageId: ' + result.messageId }])
   const meta = send.output.presentationMeta(args, result)
   assert.deepEqual(meta, result)
   const replayedMeta = JSON.parse(JSON.stringify(meta))
@@ -743,40 +742,48 @@ test('查询未记账的指定消息时显式返回 unknown', async () => {
     receiptMeaning: 'claimed 仅表示目标 turn 已从 Inbox 认领消息；传输回执不表示对方已读、回复或完成。',
     entries: [{ messageId: 'agent-msg-missing', state: 'unknown', targetRuntimeStatus: 'idle' }],
   })
+  await assert.rejects(tools.get('check_delivery').execute({ to: target.id }, {}), /no calling agent/)
 })
 
-test('重启后凭 messageId 从目标日志恢复回执', async () => {
+test('重启后按持久来源核对回执归属，保持 Inbox 的原始索引', async () => {
+  const sender = liveAgent('session-sender')
+  const other = liveAgent('session-other')
+  const to = 'session-target'
+  const mine = relayMessage('agent-msg-mine', sender.id, to)
+  const theirs = relayMessage('agent-msg-other', other.id, to)
+  const legacy = relayMessage('agent-msg-legacy', sender.id)
+  const unattributed = { id: 'agent-msg-no-source' }
+  const wrongTarget = relayMessage('agent-msg-wrong-target', sender.id, 'session-elsewhere')
   const sessionQuery = {
     readSession: async () => ({
-      session: { id: 'session-target', isSeeded: false },
+      session: { id: to, isSeeded: false },
       inheritedEventCount: 0,
-      events: [{
-        seq: 0,
-        type: 'agent/inbox/spliced',
-        data: {
-          target: 'next-turn',
-          start: 0,
-          inserted: [{ id: 'agent-msg-before-restart' }],
+      events: [
+        spliced('next-turn', [theirs, mine, legacy, unattributed, wrongTarget]),
+        {
+          type: 'agent/inbox/spliced',
+          data: { target: 'next-turn', start: 1, removedCount: 1, inserted: [], outcome: 'canceled' },
         },
-      }],
+      ],
     }),
   }
-  const { tools } = setup({ services: { sessionQuery } })
+  const { tools } = setup({ agents: [sender, other], services: { sessionQuery } })
+  async function lookup(agent, messageId) {
+    const { entries } = await tools.get('check_delivery').execute({ to, messageId }, { agent })
+    return entries[0]
+  }
 
-  const result = await tools.get('check_delivery').execute({
-    to: 'session-target',
-    messageId: 'agent-msg-before-restart',
-  })
-
-  assert.deepEqual(result, {
-    to: 'session-target',
-    receiptMeaning: 'claimed 仅表示目标 turn 已从 Inbox 认领消息；传输回执不表示对方已读、回复或完成。',
-    entries: [{ messageId: 'agent-msg-before-restart', state: 'pending', targetRuntimeStatus: 'offline' }],
-  })
+  assert.deepEqual(await lookup(sender, mine.id), { messageId: mine.id, state: 'discarded', targetRuntimeStatus: 'offline' })
+  assert.equal((await lookup(other, theirs.id)).state, 'pending')
+  assert.equal((await lookup(sender, legacy.id)).state, 'pending')
+  assert.equal((await lookup(other, mine.id)).state, 'unknown')
+  assert.equal((await lookup(sender, unattributed.id)).state, 'unknown')
+  assert.equal((await lookup(sender, wrongTarget.id)).state, 'unknown')
 })
 
-test('批量查询同一离线会话的回执只读取一次日志', async () => {
+test('同一目标的批量回执按发送方隔离且每批只读取一次日志', async () => {
   const sender = liveAgent('session-sender')
+  const other = liveAgent('session-other')
   const target = liveAgent('session-target')
   let reads = 0
   const sessionQuery = {
@@ -794,34 +801,44 @@ test('批量查询同一离线会话的回执只读取一次日志', async () =>
     },
   }
   const { tools, agentMap } = setup({
-    agents: [sender, target],
+    agents: [sender, other, target],
     services: { sessionQuery },
   })
-  await tools.get('send_agent_message').execute(
+  const first = await tools.get('send_agent_message').execute(
     { to: 'session-target', content: '第一条' },
     { agent: sender },
   )
-  await tools.get('send_agent_message').execute(
+  const second = await tools.get('send_agent_message').execute(
     { to: 'session-target', content: '第二条' },
     { agent: sender },
   )
+  const foreign = await tools.get('send_agent_message').execute(
+    { to: 'session-target', content: '另一会话的消息' },
+    { agent: other },
+  )
   agentMap.delete('session-target')
 
-  const result = await tools.get('check_delivery').execute(
-    { to: 'session-target' },
-    { agent: sender },
-  )
+  const check = tools.get('check_delivery')
+  const result = await check.execute({ to: target.id }, { agent: sender })
 
-  assert.equal(result.entries.length, 2)
+  assert.deepEqual(result.entries.map(({ messageId }) => messageId), [first.messageId, second.messageId])
   assert.deepEqual(result.entries.map((entry) => entry.state), ['pending', 'pending'])
   assert.equal(reads, 1)
+
+  const otherResult = await check.execute({ to: target.id }, { agent: other })
+  assert.deepEqual(otherResult.entries.map(({ messageId }) => messageId), [foreign.messageId])
+  assert.equal(reads, 2)
+
+  const forbidden = await check.execute({ to: target.id, messageId: first.messageId }, { agent: other })
+  assert.deepEqual(forbidden.entries, [{ messageId: first.messageId, state: 'unknown', targetRuntimeStatus: 'offline' }])
+  assert.equal(reads, 2)
 })
 
 test('在线分叉不会把父会话的投递与认领历史当作自身回执', async () => {
   const sender = liveAgent('session-sender')
   // 父会话：A 发来的消息已插入并被认领（父会话自有事件）。
   const parentEvents = [
-    spliced('next-turn', [{ id: 'agent-msg-parent' }]),
+    spliced('next-turn', [relayMessage('agent-msg-parent', sender.id)]),
     spliced('next-turn', [], 1),
   ]
   const parent = liveAgent('session-parent', 'session-parent', makeSession({ own: parentEvents }))
@@ -844,7 +861,7 @@ test('在线分叉不会把父会话的投递与认领历史当作自身回执',
     { to: 'session-fork', content: '发给分叉的消息' },
     { agent: sender },
   )
-  fork.session.append(spliced('next-turn', [{ id: sent.messageId }]))
+  fork.session.append(spliced('next-turn', fork.inbox.nextTurn))
 
   const own = await tools.get('check_delivery').execute({
     to: 'session-fork',
@@ -857,7 +874,7 @@ test('在线分叉不会把父会话的投递与认领历史当作自身回执',
 test('重启后离线分叉同样不继承父会话回执', async () => {
   const sender = liveAgent('session-sender')
   const parentEvents = [
-    spliced('next-turn', [{ id: 'agent-msg-parent' }]),
+    spliced('next-turn', [relayMessage('agent-msg-parent', sender.id)]),
     spliced('next-turn', [], 1),
   ]
   const sessionQuery = {
@@ -865,7 +882,7 @@ test('重启后离线分叉同样不继承父会话回执', async () => {
       session: { id: 'session-fork', isSeeded: true, parentSession: 'session-parent' },
       // 离线快照同时给出完整日志与公开继承边界。
       inheritedEventCount: parentEvents.length,
-      events: [...parentEvents, spliced('next-turn', [{ id: 'agent-msg-fork' }])],
+      events: [...parentEvents, spliced('next-turn', [relayMessage('agent-msg-fork', sender.id, 'session-fork')])],
     }),
   }
   const { tools } = setup({ agents: [sender], services: { sessionQuery } })
@@ -912,8 +929,8 @@ test('继承边界无法确定时受控失败，不静默按无继承历史折�
 
 test('旧版 header.seedLength 合同仍可确定继承边界', async () => {
   const sender = liveAgent('session-sender')
-  const parentEvents = [spliced('next-turn', [{ id: 'agent-msg-parent' }])]
-  const legacyOwn = spliced('next-turn', [{ id: 'agent-msg-fork' }])
+  const parentEvents = [spliced('next-turn', [relayMessage('agent-msg-parent', sender.id)])]
+  const legacyOwn = spliced('next-turn', [relayMessage('agent-msg-fork', sender.id)])
 
   // 旧版在线会话：无 ownEvents()，边界只在 header.seedLength 上。
   const legacyAgent = liveAgent('session-legacy', 'session-legacy', {
@@ -960,8 +977,8 @@ test('旧版 header.seedLength 合同仍可确定继承边界', async () => {
 
 test('离线读取优先使用宿主 observeSession，并按其继承边界归属回执', async () => {
   const sender = liveAgent('session-sender')
-  const parentEvents = [spliced('next-turn', [{ id: 'agent-msg-parent' }])]
-  const forkOwn = spliced('next-turn', [{ id: 'agent-msg-fork' }])
+  const parentEvents = [spliced('next-turn', [relayMessage('agent-msg-parent', sender.id)])]
+  const forkOwn = spliced('next-turn', [relayMessage('agent-msg-fork', sender.id, 'session-fork')])
   const full = [...parentEvents, spliced('session/end-seed', []), forkOwn]
   let readSessionCalls = 0
   let disposed = 0
@@ -999,7 +1016,7 @@ test('宿主只提供 readSession 时回退到旧接口', async () => {
     readSession: async () => ({
       session: { id: 'session-only-read', isSeeded: false },
       inheritedEventCount: 0,
-      events: [spliced('next-turn', [{ id: 'agent-msg-read-only' }])],
+      events: [spliced('next-turn', [relayMessage('agent-msg-read-only', sender.id, 'session-only-read')])],
     }),
   }
   const { tools } = setup({ agents: [sender], services: { sessionQuery } })

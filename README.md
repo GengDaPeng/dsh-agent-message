@@ -24,7 +24,7 @@
 |---|---|
 | `list_peer_agents` | 列出所有**可发送**的独立会话：未归档、排除真实子代理；普通 fork 保留。返回 id、标题、工作目录和运行状态 |
 | `send_agent_message` | 给指定会话 ID 发消息；默认使用 `followup` 创建独立的新 turn，离线时自动恢复后投递；显式支持 `followup`、`inject`、`steer` |
-| `check_delivery` | 按需查询消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
+| `check_delivery` | 按需查询本会话发出的消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
 | Harness 原生 `@` 会话引用 | 直接复用 Harness 的结构化 Session Reference；选择后当前 Agent 获得稳定 Session ID 和一份有界、只读、标记为不可信的会话快照。引用本身不会发送消息或唤醒目标 |
 | 可见的 Agent 消息来源 | relay 仍保留真实的插件来源；Harness 0.2.x 把它渲染成引发新 turn 的「收到执行请求」行，插件在该行展开后补出可点击的 `来自会话 · <名称>:` 发送方行，并隐藏模型寻址用的协议首行，文案跟随 Harness 语言设置 |
 | 投递卡片设置 | Host 端声明 `Config` 的 `.volatile()` 字段；0.2.2 起插件在「插件页 → dsh-agent-message 详情页」注册配置区（`plugins.bundle.config` 槽，位于详细介绍与包含的组件之间），写入 Harness settings 文档；可切换是否显示投递模式和目标运行状态，`messageId` 始终显示 |
@@ -102,7 +102,7 @@ Agent 会用 bash 执行这条命令，装完自动挂载、所有会话立即�
 
 `send_agent_message` 成功把原生消息提交给目标 Inbox 后立即返回 `accepted` 和该消息的原生 `messageId`；精简工具结果和完整工具卡片都会显示可选择复制的 `messageId`，完整结果同时保留在工具呈现元数据中。`check_delivery` 根据 Inbox 事件按需返回 `pending`（仍在排队）、`claimed`（已被某轮认领）、`discarded`（被取消）或 `unknown`。`claimed` 只是传输证据，不表示已读、回复或任务完成。接纳前失败由 Harness 工具错误表示，不写入目标 Inbox。目标是否正在运行通过独立的 `targetRuntimeStatus` 返回，不把 Agent 的整体运行状态误当成某条消息正在处理。指定 `messageId` 时可从目标现有 Inbox 日志恢复状态，因此进程重启后仍可查询。
 
-回执归属只统计目标会话**自有**的 Inbox 事件，在线与离线使用同一条规则。分叉会话继承的父会话历史属于父会话：父会话收到的消息被认领或丢弃，不会出现在分叉的回执里；向分叉新发送的消息仍可正常查询。边界取自宿主公开的继承信息（在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧版合同为 `header.seedLength`）。宿主既声明存在分叉、又无法给出可判定边界时，查询返回明确的受控错误，不静默按「没有继承历史」折叠，也不伪装成 `unknown`。
+回执归属只统计本会话发出、且能从目标会话**自有** Inbox 事件确认来源的 relay。来源无法核验或属于其他会话时，按 ID 查询返回 `unknown`。在线与离线使用同一条规则。分叉会话继承的父会话历史属于父会话：父会话收到的消息被认领或丢弃，不会出现在分叉的回执里；向分叉新发送的消息仍可正常查询。边界取自宿主公开的继承信息（在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧版合同为 `header.seedLength`）。宿主既声明存在分叉、又无法给出可判定边界时，查询返回明确的受控错误，不静默按「没有继承历史」折叠，也不伪装成 `unknown`。
 
 所有跨会话消息都由 Harness `createUserMessage()` 创建，`UserMessage.id` 是唯一消息身份。`source.kind` 固定为 `dsh-agent-message`，`form` 固定为 `relay`，并携带协议版本、发送/目标 Session 和显示标题。由于当前 Harness 不会把自定义 source 字段展开给模型，Host 还会在正文首行写入只含 `senderSessionId` 的最小 `<dsh-agent-message>` 协议头；source 是持久化/UI 真相，协议头只是回复寻址所需的模型可见投影。插件不注册全局系统提示词，发送准入只存在于 `send_agent_message` 的工具合同中。Client 只把 relay 投影为可见的 Agent 消息卡片，不会反向把 Agent 消息伪装成人类 `user` 来源。
 
@@ -145,7 +145,7 @@ pnpm peers check
 - 工具只用于独立 Session 之间通信；真实子代理既不会出现在目标列表中，也不能作为调用方使用这些工具。
 - 同一对 Session（不分发送方向）在滚动 60 秒内最多投递 10 条消息；第 11 条会在写入目标 Inbox 前被拒绝。该窗口只属于当前 Harness 进程，重启后清空。
 - 自动恢复离线会话时会使用**默认模型**（不继承它上次手动切换的模型选择）；恢复失败时消息不会被写入目标 Inbox。
-- 不指定 `messageId` 的批量回执依赖内存记账，只覆盖本进程最近 1000 条发送记录（FIFO 淘汰）；进程重启后仍可凭已知 `messageId` 查询，但不再返回易失的 `sentAt` 和 `mode`。
+- 不指定 `messageId` 时，从本进程最近 1000 条发送记录（FIFO 淘汰）中筛出当前会话发给目标的消息。重启后凭已知 `messageId` 查询持久回执状态。`sentAt` 和 `mode` 来自本进程内记账。
 - 跨进程/跨机器通信不在本插件范围内。
 
 ## License

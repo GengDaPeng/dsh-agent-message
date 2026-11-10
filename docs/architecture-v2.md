@@ -144,7 +144,7 @@ Harness 是以下事实的唯一 Owner：
 
 插件不得直接追加核心 Inbox 事件，不得调用私有 wake 方法，也不得维护第二份 pending mailbox。
 
-回执归属只折叠目标 Session **自有**的 Inbox 事件，且在线与离线共用一条规则。继承边界取自宿主公开信息：在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧合同为 `header.seedLength`。分叉继承的父会话历史属于父会话，不得计入分叉回执；宿主声明存在分叉却没有可判定边界时返回受控错误，不静默按「无继承历史」折叠，也不伪装成 `unknown`。
+回执只归属于发出消息的调用会话。批量查询按发送方和目标筛选内存记账，Inbox 重放按持久 relay 来源核对归属。只折叠目标 Session **自有**的 Inbox 事件，在线与离线共用一条规则。继承边界取自宿主公开信息：在线为 `Session.ownEvents()`，离线为 `SessionLogSnapshot.inheritedEventCount`，旧合同为 `header.seedLength`。分叉继承的父会话历史属于父会话，不得计入分叉回执；宿主声明存在分叉却没有可判定边界时返回受控错误，不静默按「无继承历史」折叠，也不伪装成 `unknown`。
 
 ## 5. Harness 原生 `@` Session Reference 语义
 
@@ -282,7 +282,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 }
 ```
 
-规范结果只在工具执行期存在。模型侧投影“已投递”和原生 `messageId`，完整结果通过 Harness 的 `presentationMeta` 留给工具界面，卡片同样显示可选择复制的 `messageId`；需要传输状态时再调用 `check_delivery`，不把其余诊断详情自动灌入模型上下文。
+规范结果只在工具执行期存在。模型侧返回“目标收件箱已接纳。”和原生 `messageId`，完整结果通过 Harness 的 `presentationMeta` 留给工具界面，卡片同样显示可选择复制的 `messageId`；需要传输状态时再调用 `check_delivery`，不把其余诊断详情自动灌入模型上下文。
 
 `check_delivery` 可以保留为可选诊断，针对同一个原生 `messageId` 报告：
 
@@ -320,7 +320,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 | Host | `agents`、`tools`、`sessionQuery` | 插件不加载，不自行扫描日志或仿造运行时 |
 | Client | `slots`、`timer`、`sessions`、`uiWorkspace`、`locale` | Client 扩展不加载；Host 工具仍可工作 |
 
-Host 端插件配置使用 Cordis `Config` 的 `.volatile()` 字段，值由 Harness settings 文档持有并原地更新配置引用，插件不再依赖 `dsh-settings` 的注册 API。Harness `0.2.2-rc.1` 起，第三方插件的 `Config` 不再自动出现在设置页；Plugin Client 通过 `plugins.bundle.config` 槽（key = `dsh-agent-message`）把 `showTechnicalDetails` 配置区直接渲染在插件详情页「详细介绍」与「包含的组件」之间，经 `ctx.inject(["configForms"])` 注入的 `ConfigFormController` 读写同一个 settings namespace，`configForms` 缺失时该入口静默不注册。Client 侧 `uiWorkspace` 只用于把发送方 Session ID 导航到前台；服务缺失时跳转静默降级，不影响投递与回执。
+Host 端插件配置使用 Cordis `Config` 的 `.volatile()` 字段。Harness settings 更新字段引用，Host 在渲染卡片时通过 `.get()` 读取当前值。Harness `0.2.2-rc.1` 起，第三方插件的 `Config` 不再自动出现在设置页；Plugin Client 通过 `plugins.bundle.config` 槽（key = `dsh-agent-message`）把 `showTechnicalDetails` 配置区直接渲染在插件详情页「详细介绍」与「包含的组件」之间，经 `ctx.inject(["configForms"])` 注入的 `ConfigFormController` 读写同一个 settings namespace，`configForms` 缺失时该入口静默不注册。Client 侧 `uiWorkspace` 只用于把发送方 Session ID 导航到前台；服务缺失时跳转静默降级，不影响投递与回执。
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
