@@ -72,6 +72,7 @@ import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts')
+const DSH_HOME_DIR = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const DEFAULT_DSH = '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
 const PLUGIN_NAME = 'dsh-agent-message'
 const HEADLESS_BUNDLE = '@deepseek-ai/dsh-headless'
@@ -200,8 +201,7 @@ function writeRouteOverlay(modelRoute) {
  * written into the evidence.
  */
 function resolveCredentialRef(name) {
-  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-  const path = join(home, '.credentials.yaml')
+  const path = join(DSH_HOME_DIR, '.credentials.yaml')
   if (!existsSync(path)) throw new Error(`credential store not found at ${path}`)
   const lines = readFileSync(path, 'utf8').split('\n')
   const start = lines.findIndex((line) => /^refs:\s*$/.test(line))
@@ -426,7 +426,7 @@ async function main() {
   if (options.profile.toLowerCase() === 'desktop') throw new Error('refusing to touch the desktop profile')
   if (options.profile === '' || /[/\\]/.test(options.profile)) throw new Error(`invalid profile name ${JSON.stringify(options.profile)}`)
   const isShippedTemplate = SHIPPED_TEMPLATES.has(options.profile.toLowerCase())
-  const profileDir = join(homedir(), '.dsh', 'profiles', options.profile)
+  const profileDir = join(DSH_HOME_DIR, 'profiles', options.profile)
   if (isShippedTemplate) {
     throw new Error(`profile "${options.profile}" is a shipped template name; use a temp name such as dsh-msg-compat so no shared profile is touched`)
   }
@@ -457,7 +457,7 @@ async function main() {
   options.childEnv = { ...process.env }
   if (options.credentialRef !== undefined) {
     options.childEnv[options.credentialRef] = resolveCredentialRef(options.credentialRef)
-    process.stdout.write(`credential ref ${options.credentialRef}: resolved from ${join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), '.credentials.yaml')} (value not printed)\n`)
+    process.stdout.write(`credential ref ${options.credentialRef}: resolved from ${join(DSH_HOME_DIR, '.credentials.yaml')} (value not printed)\n`)
   }
 
   try {

@@ -133,15 +133,17 @@ dsh-agent-message/
 pnpm test
 node scripts/verify-0.2.mjs          # 真机：临时 profile 安装 + --dump-config 组合校验（无模型调用）
 node scripts/verify-0.2.mjs --with-headless   # 追加一次真实会话，验证工具注册可用
+node scripts/verify-0.2-web.mjs      # 真机：临时 Web profile 启动 + Client 资源校验
 pnpm run test:web-smoke
 pnpm peers check
 ```
 
-`pnpm test` 覆盖 Host/Client 合同与源码边界。`verify-0.2.mjs` 通过本机捆绑的 `dsh` CLI 在临时 profile（`dsh-msg-*`，不触碰既有 profile）里安装当前仓库并做真机校验，`--with-headless` 会消耗一次模型调用。`test:web-smoke` 需要本机 `dsh` 已在 PATH 且配置 Web Profile。真实交互验收记录见 [`docs/architecture-v2.md`](./docs/architecture-v2.md#14-验证记录)。
+`pnpm test` 覆盖 Host/Client 合同与源码边界。两个 `verify-0.2` 脚本都使用本机捆绑的 `dsh` CLI 和临时 profile（`dsh-msg-*`），可以通过 `DSH_HOME` 指定独立的测试目录。`--with-headless` 会消耗一次模型调用。`test:web-smoke` 需要本机 `dsh` 已在 PATH 且配置 Web Profile。真实交互验收记录见 [`docs/architecture-v2.md`](./docs/architecture-v2.md#14-验证记录)。
 
 ## 限制
 
-- 目标会话必须**未归档**且存在于本机持久化里；归档会话一律拒绝发送。
+- 目标会话必须**未归档**且存在于本机持久化里。离线目标在查询或恢复期间被归档时，投递也会被拒绝。
+- 消息正文不能为空或只有空白字符。
 - 工具只用于独立 Session 之间通信；真实子代理既不会出现在目标列表中，也不能作为调用方使用这些工具。
 - 同一对 Session（不分发送方向）在滚动 60 秒内最多投递 10 条消息；第 11 条会在写入目标 Inbox 前被拒绝。该窗口只属于当前 Harness 进程，重启后清空。
 - 自动恢复离线会话时会使用**默认模型**（不继承它上次手动切换的模型选择）；恢复失败时消息不会被写入目标 Inbox。

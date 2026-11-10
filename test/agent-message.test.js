@@ -633,6 +633,42 @@ test('归档、未知和自身会话在发送边界被拒绝', async () => {
   await assert.rejects(send('session-missing'), /会话不存在/)
 })
 
+for (const stage of ['读取日志', '恢复会话', '并发恢复']) {
+  test(`离线目标在${stage}期间被归档时不投递`, async () => {
+    const sender = liveAgent('session-sender')
+    const target = liveAgent('session-target')
+    const workspaceRegistry = { archivedSessionIds: [] }
+    const harness = setup({
+      agents: [sender],
+      services: {
+        workspaceRegistry,
+        sessionQuery: {
+          readSession: async () => {
+            if (stage === '读取日志') workspaceRegistry.archivedSessionIds = [target.id]
+            return { session: { id: target.id }, events: [] }
+          },
+        },
+        resumeAgent: async () => {
+          assert.notEqual(stage, '读取日志', '已经归档的会话不应被恢复')
+          workspaceRegistry.archivedSessionIds = [target.id]
+          if (stage === '并发恢复') {
+            harness.agentMap.set(target.id, target)
+            throw new Error('agent already registered')
+          }
+          return { agent: target, dispose() {} }
+        },
+      },
+    })
+
+    await assert.rejects(harness.tools.get('send_agent_message').execute(
+      { to: target.id, content: '不应送达' },
+      { agent: sender },
+    ), /对方会话已归档/)
+    assert.equal(target.inbox.nextTurn.length, 0)
+    await harness.dispose()
+  })
+}
+
 test('发送边界保留普通 fork 并拒绝真实子代理', async () => {
   const sender = liveAgent('session-sender')
   const fork = liveAgent('session-fork')
@@ -689,6 +725,21 @@ test('真实子代理不能使用独立会话通信工具', async () => {
     { agent: subagent },
   ), /子代理不能使用/)
   assert.equal(target.inbox.nextTurn.length, 0)
+})
+
+test('拒绝空白正文且不读取离线目标', async () => {
+  const sender = liveAgent('session-sender')
+  const { tools } = setup({
+    agents: [sender],
+    services: { sessionQuery: { readSession: () => assert.fail('空白消息不应读取会话') } },
+  })
+
+  for (const content of ['', ' \t\n\u3000']) {
+    await assert.rejects(tools.get('send_agent_message').execute(
+      { to: 'session-target', content },
+      { agent: sender },
+    ), /消息正文不能为空或全为空白/)
+  }
 })
 
 test('消息正文不能嵌套 Host 保留协议标签', async () => {

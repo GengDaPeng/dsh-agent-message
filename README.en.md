@@ -132,15 +132,17 @@ dsh-agent-message/
 pnpm test
 node scripts/verify-0.2.mjs          # real host: temp-profile install + --dump-config composition check (no model call)
 node scripts/verify-0.2.mjs --with-headless   # additionally runs one real session to prove the tools are registered
+node scripts/verify-0.2-web.mjs      # real host: boot a temp Web profile and verify the client asset
 pnpm run test:web-smoke
 pnpm peers check
 ```
 
-`pnpm test` covers the Host/Client contracts and source-level boundaries. `verify-0.2.mjs` installs this checkout into a temporary `dsh-msg-*` profile through the bundled `dsh` CLI (never touching existing profiles); `--with-headless` spends one model call. `test:web-smoke` requires `dsh` on PATH and a configured Web Profile. See the [architecture validation record](./docs/architecture-v2.md#14-验证记录) for real interaction coverage.
+`pnpm test` covers the Host/Client contracts and source-level boundaries. Both `verify-0.2` scripts use the bundled `dsh` CLI with temporary `dsh-msg-*` profiles. Set `DSH_HOME` to use a separate test directory. `--with-headless` spends one model call. `test:web-smoke` requires `dsh` on PATH and a configured Web Profile. See the [architecture validation record](./docs/architecture-v2.md#14-验证记录) for real interaction coverage.
 
 ## Limitations
 
-- The target session must be **non-archived** and present in local persistence; archived sessions are always rejected.
+- The target session must be **non-archived** and present in local persistence. Delivery is also rejected if an offline target is archived while being looked up or resumed.
+- The message body cannot be empty or contain only whitespace.
 - These tools are only for communication between independent sessions; actual subagents are neither listed as targets nor allowed to call them.
 - One Session pair, regardless of direction, may receive at most 10 deliveries in a rolling 60-second window. The 11th is rejected before the target Inbox is changed. This window belongs to the current Harness process and resets on restart.
 - Automatically resuming an offline session uses the **default model** (it does not inherit a model manually selected earlier in that session); if resume fails, the message is not written to the target Inbox.

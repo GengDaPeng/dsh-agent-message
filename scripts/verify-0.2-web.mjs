@@ -177,7 +177,7 @@ async function main() {
     throw new Error(`--evidence must live under ${relative(REPO_ROOT, SCRIPTS_DIR)}/`)
   }
 
-  const profileDir = join(homedir(), '.dsh', 'profiles', options.profile)
+  const profileDir = join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'profiles', options.profile)
   const versionResult = await run(options.dsh, ['--version'], { timeoutMs: options.timeoutMs })
   process.stdout.write(`dsh: ${options.dsh}\nversion: ${versionResult.stdout.trim()}\nprofile: ${options.profile} -> ${profileDir}\nplugin: ${PLUGIN_NAME} @ ${options.plugin}\n`)
 
