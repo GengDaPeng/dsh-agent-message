@@ -27,8 +27,7 @@
 | `check_delivery` | 按需查询消息回执（pending/claimed/discarded/unknown）；发送成功时先返回 accepted，接纳前失败由工具错误表示；指定消息 ID 时支持重启后恢复查询 |
 | Harness 原生 `@` 会话引用 | 直接复用 Harness 的结构化 Session Reference；选择后当前 Agent 获得稳定 Session ID 和一份有界、只读、标记为不可信的会话快照。引用本身不会发送消息或唤醒目标 |
 | 可见的 Agent 消息来源 | relay 仍保留真实的插件来源；Harness 0.2.x 把它渲染成引发新 turn 的「收到执行请求」行，插件在该行展开后补出可点击的 `来自会话 · <名称>:` 发送方行，并隐藏模型寻址用的协议首行，文案跟随 Harness 语言设置 |
-| 复制会话 ID | 会话头部新增「复制ID」按钮，一键复制当前会话 ID |
-| 投递卡片设置 | Host 端声明 `Config` 的 `.volatile()` 字段，Harness 在设置 → 插件中据此自动生成表单；可切换是否显示投递模式和目标运行状态，`messageId` 始终显示 |
+| 投递卡片设置 | Host 端声明 `Config` 的 `.volatile()` 字段；0.2.2 起插件在「插件页 → dsh-agent-message 详情页」注册配置区（`plugins.bundle.config` 槽，位于详细介绍与包含的组件之间），写入 Harness settings 文档；可切换是否显示投递模式和目标运行状态，`messageId` 始终显示 |
 
 ### 发送方导航示例
 
@@ -57,7 +56,7 @@ dsh plugin --profile web add dsh-agent-message
 
 装完即自动注册，无需任何额外配置。
 
-兼容范围：Node.js 24、DeepSeek Harness `>=0.1.1-rc.2 <0.2.0`。会话日志读取与回执归属路径已分别按旧合同 `0.1.1-rc.2` 与当前合同 `0.1.5-rc.1`（随附 `dsh-session-query` `0.1.5-rc.2`）核对；Node.js 验证版本为 `24.x`。
+兼容范围：Node.js 24、DeepSeek Harness `>=0.2.2-rc.1 <0.3.0`（随附 `@deepseek-ai/schemastery` `>=3.19.0`）。Host 会话读取与回执归属走公开的 `observeSession()` / `ownEvents()` / `inheritedEventCount` 继承边界，仅在宿主只提供旧 `readSession()` 时回退；插件配置是 Host `Config` 的 `.volatile()` 字段，表单由插件页组件行渲染并写入 Harness settings 文档。已对 Node.js `24.x` 与 Harness `0.2.2-rc.1` 做真机验证。
 
 ### 方式二：从 GitHub 安装
 
@@ -119,9 +118,9 @@ relay 只表达“另一会话发来的消息”，本身不等于必须回复�
 dsh-agent-message/
 ├── lib/
 │   ├── index.js        # host 半区：list_peer_agents / send_agent_message / check_delivery
-│   └── client.js       # client 半区：relay 显示、发送方导航、设置与复制会话ID按钮
+│   └── client.js       # client 半区：relay 显示、发送方导航、插件页配置表单
 ├── cordis.patch.yml    # 自注册补丁（dsh.bundle.patch 指向它）
-├── package.json        # DSH 插件清单（dsh.bundle / dsh.client / dshx.contributes）
+├── package.json        # DSH 插件清单（dsh.bundle / dsh.client）
 ├── docs/               # 现役/候选架构与 README 示例截图
 ├── scripts/web-smoke.mjs # 真实 Web Profile 启动与配置冒烟
 ├── README.md           # 中文文档

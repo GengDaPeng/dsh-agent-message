@@ -38,7 +38,7 @@ class FakeElement {
 }
 
 /**
- * 装载客户端模块并提供 0.2.1 形状的 ctx。
+ * 装载客户端模块并提供 0.2.2 形状的 ctx。
  * @param slug - 每个用例独立的模块实例后缀，避免 ESM 缓存串场。
  * @param options.lackingWorkspace - 省略 uiWorkspace 服务，验证静默降级。
  */
@@ -48,8 +48,24 @@ async function harness(slug, options = {}) {
   const localeSubscribers = []
   const listeners = []
   const registered = []
+  const components = []
   const opened = []
   const observers = []
+  const configWrites = []
+  const configNamespaces = []
+  const configForm = {
+    getSnapshot: () => ({
+      status: 'ready',
+      value: { showTechnicalDetails: true },
+      base: {},
+      user: {},
+      revision: 7,
+      writable: true,
+    }),
+    subscribe: () => () => {},
+    set: async (field, value) => { configWrites.push({ field, value }); return true },
+  }
+  const configForms = { get: (namespace) => { configNamespaces.push(namespace); return configForm } }
 
   const body = new FakeElement('body')
   const head = new FakeElement('head')
@@ -87,6 +103,8 @@ async function harness(slug, options = {}) {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     useState: (value) => [value, () => {}],
+    useCallback: (callback) => callback,
+    useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
   }
   const client = loaded.factory((id) => {
     if (id === 'react') return React
@@ -106,13 +124,17 @@ async function harness(slug, options = {}) {
     },
     slots: {
       inject(_name, register) { register() },
-      register(descriptor) { registered.push(descriptor); return () => {} },
+      register(descriptor, component) { registered.push(descriptor); components.push(component); return () => {} },
     },
+    configForms,
     effect(factory) {
       const cleanup = factory()
       if (typeof cleanup === 'function') cleanups.push(cleanup)
     },
-    timeout(callback) { callback() },
+  }
+  ctx.inject = (_deps, callback) => {
+    if (options.lackingConfigForms === true) return
+    callback({ slots: ctx.slots, configForms })
   }
   if (options.lackingWorkspace !== true) {
     ctx.uiWorkspace = { openSession: (sessionId) => { opened.push(sessionId) } }
@@ -126,7 +148,7 @@ async function harness(slug, options = {}) {
     globalThis.window = previous.window
   }
 
-  return { client, ctx, document, body, listeners, registered, opened, observers, sessionSubscribers, localeSubscribers, restore }
+  return { client, ctx, document, body, listeners, registered, components, opened, observers, sessionSubscribers, localeSubscribers, configWrites, configNamespaces, configForm, restore }
 }
 
 function dispatch(listeners, type, event) {
@@ -164,17 +186,59 @@ test('会话或语言变化只刷新已识别的发送方链接，不重新扫�
   }
 })
 
-test('注入 0.2.1 的运行时服务，头部动作描述符不再带 label', async () => {
+test('注入 0.2.2 的运行时服务，只注册插件页配置表单', async () => {
   const h = await harness('inject')
   try {
-    assert.deepEqual(h.client.inject, ['slots', 'timer', 'sessions', 'uiWorkspace', 'locale'])
+    assert.deepEqual(h.client.inject, ['slots', 'sessions', 'uiWorkspace', 'locale'])
     h.client.apply(h.ctx)
 
-    assert.deepEqual(h.registered, [{
-      name: 'conversation.session.header.actions',
-      id: 'copy-session-id',
-      order: 30,
-    }])
+    assert.equal(h.registered.length, 1)
+    assert.equal(h.registered[0].name, 'plugins.bundle.config')
+    assert.equal(h.registered[0].key, 'dsh-agent-message')
+    assert.equal(typeof h.registered[0].inject, 'function')
+  } finally {
+    await h.restore()
+  }
+})
+
+test('configForms 缺失时跳过插件配置入口，其余 Client 能力不受影响', async () => {
+  const h = await harness('no-config-forms', { lackingConfigForms: true })
+  try {
+    h.client.apply(h.ctx)
+    assert.equal(h.registered.length, 0)
+    assert.equal(h.components.length, 0)
+    assert.equal(h.observers.length, 1)
+  } finally {
+    await h.restore()
+  }
+})
+
+test('0.2.2 插件详情页渲染 Host Config 开关并写入 settings 文档', async () => {
+  const h = await harness('config-form')
+  try {
+    h.client.apply(h.ctx)
+
+    const configComponent = h.components[0]
+    const injected = h.registered[0].inject()
+    assert.deepEqual(h.configNamespaces, ['agent-message'])
+    assert.equal(injected.liveForm, h.configForm)
+
+    assert.equal(configComponent({ view: 'summary' }), null)
+
+    const page = configComponent({ view: 'page', liveForm: injected.liveForm })
+    assert.equal(page.type, 'div')
+    const [title, bodyElement] = page.props.children[0]
+    assert.equal(title.type, 'h4')
+    assert.equal(typeof bodyElement.type, 'function')
+    const body = bodyElement.type(bodyElement.props)
+    const [toggle] = body.props.children[0]
+    assert.equal(toggle.type, 'label')
+    const [input] = toggle.props.children[0]
+    assert.equal(input.type, 'input')
+    assert.equal(input.props.checked, true)
+    assert.equal(input.props.disabled, false)
+    await input.props.onChange({ target: { checked: false } })
+    assert.deepEqual(h.configWrites, [{ field: 'showTechnicalDetails', value: false }])
   } finally {
     await h.restore()
   }

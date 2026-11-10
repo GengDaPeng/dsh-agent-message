@@ -4,7 +4,7 @@
 >
 > 初稿：2026-08-14
 >
-> 本次修订：2026-08-31
+> 本次修订：2026-11-10（Harness `0.2.2-rc.1` 适配复核）
 >
 > 范围：同一 DeepSeek Harness 进程内，独立 Session 之间的引用、消息投递与传输诊断。
 
@@ -99,7 +99,7 @@ Harness Client 的原生 Reference 服务负责 `@` 选择、稳定 ID 和有界
 - 将 relay 投影为可见 Agent 消息卡片；
 - 从 typed relay source 解析完整发送方 `SessionId`；
 - 点击或键盘操作消息来源时调用 Harness 导航；
-- 提供复制 Session ID 和投递卡片显示设置。
+- 提供投递卡片显示设置；复制 Session ID 由 Harness 原生能力提供，插件不重复实现。
 
 Plugin Client 不注册 `@` source，不决定发送，不选择投递模式，不制造传输状态，也不改变消息协议。
 
@@ -297,7 +297,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 
 消息卡片和可点击来源是用户体验层，不是协议层。
 
-从 Harness `0.2.1-rc.2` 起，relay 的两种落点都由原生 Client 渲染，Plugin Client 只做叠加增强：
+从 Harness `0.2.1-rc.2` 起（`0.2.2-rc.1` 复核渲染路径未变），relay 的两种落点都由原生 Client 渲染，Plugin Client 只做叠加增强：
 
 - **context 行**：原生按 `source.form === "relay"` + `source.senderSessionId` 渲染 `[data-context-form="relay"]`、`[data-context-relay-sender]`、`[data-context-text]`。
 - **turn-trigger 行**：默认 `followup` 投递会开启新 turn，原生把它渲染为 `[data-turn-trigger="true"]` 的“收到执行请求”行；正文在展开后才挂载 `[data-context-text]`，原生不显示发送方。
@@ -320,7 +320,7 @@ Relay 本身既不要求回复，也不禁止回复。是否回传只由消息�
 | Host | `agents`、`tools`、`sessionQuery` | 插件不加载，不自行扫描日志或仿造运行时 |
 | Client | `slots`、`timer`、`sessions`、`uiWorkspace`、`locale` | Client 扩展不加载；Host 工具仍可工作 |
 
-Host 端插件配置使用 Cordis `Config` 的 `.volatile()` 字段，由 Harness Settings 自动生成表单并原地更新配置引用，插件不再依赖 `dsh-settings` 的注册 API。Client 侧 `uiWorkspace` 只用于把发送方 Session ID 导航到前台；服务缺失时跳转静默降级，不影响投递与回执。
+Host 端插件配置使用 Cordis `Config` 的 `.volatile()` 字段，值由 Harness settings 文档持有并原地更新配置引用，插件不再依赖 `dsh-settings` 的注册 API。Harness `0.2.2-rc.1` 起，第三方插件的 `Config` 不再自动出现在设置页；Plugin Client 通过 `plugins.bundle.config` 槽（key = `dsh-agent-message`）把 `showTechnicalDetails` 配置区直接渲染在插件详情页「详细介绍」与「包含的组件」之间，经 `ctx.inject(["configForms"])` 注入的 `ConfigFormController` 读写同一个 settings namespace，`configForms` 缺失时该入口静默不注册。Client 侧 `uiWorkspace` 只用于把发送方 Session ID 导航到前台；服务缺失时跳转静默降级，不影响投递与回执。
 
 全局 `systemPrompt` 不属于核心必需依赖。发送准入应优先由简短、明确的工具描述表达，减少对所有正常对话的持续干扰。
 
@@ -373,3 +373,11 @@ pnpm peers check
 - 真机 headless 会话中 `list_peer_agents` 返回 14 条 `session-` 会话，`send_agent_message` 可投递；
 - 端到端投递：A `session-b9dd6194…` → 离线 B `session-feb23767…`（`messageId b0778001…`）。B 的持久日志出现 `agent/inbox/spliced`（`next-turn`）与 `user/message`，`source = { kind: "dsh-agent-message", form: "relay", senderSessionId: A }`，正文以 `<dsh-agent-message>{"senderSessionId":…}</dsh-agent-message>` 开头；B 被自动 resume 并完成该 turn；
 - Web 真机：`plugins/??dsh-agent-message/client.js&rev=…` 返回 200 且含 `dsh-agent-message-client`，启动无 client 加载错误；真实浏览器中确认 client 半区 `apply` 生效（注入样式表存在）、`conversation.session.header.actions` 的「复制ID」按钮渲染、turn-trigger relay 行展开后被标记 `data-agent-msg-relay-card`、协议首行被剥离、`来自会话 · <标题>:` 发送方行生成且点击后主视图切换到发送方会话；client Inspect 服务目录确认 `slots`、`timer`、`sessions`、`uiWorkspace`、`locale` 五个注入服务均存在。
+
+2026-11-10 在 Harness `0.2.2-rc.1` 上完成新版适配复核与真机验证（Node.js `24.x`；app 内 `cordis 4.1.0`、`schemastery 3.19.0`、`@deepseek-ai/dsh-* 0.2.2-rc.1`）：
+
+- 合同比对：`defineTool` / `ToolDefinition`（含 `output.render`、`presentationMeta`、`presentResult`）、`createUserMessage` / `freezeMessage`、`Agent.status/followup/inject/steer/session`、`agent/inbox/spliced`、`session-query` 整包、`sessionTitle.get()`、`workspaceRegistry.archivedSessionIds`、`agents.resume(ResumeAgentOptions)`、`agent/disposed`、Client `slots`、`ISessions.list`、`locale`、`uiWorkspace.openSession`、`timer.timeout`、`__ModuleLoader__.load` 均未变；0.2.2 要求迁移的 Session Projection 异步注册、`tools.resolve/executable`、`agent/request` 路由与 PTC 拆分本插件均未使用。
+- `pnpm test` 53/53 通过；`scripts/verify-0.2.mjs` PASS 4/4（临时 profile 创建、安装、`--dump-config` 组合出 `dsh-agent-message` bundle，失败模式行 0）；`scripts/verify-0.2-web.mjs` PASS 5/5（served HTML 注册插件 client、`plugins/??dsh-agent-message/client.js&rev=…` 返回 200 且含 `dsh-agent-message-client`、启动无 client 加载错误）。
+- 真实浏览器（临时 web profile）：client `apply` 生效（插件样式表存在）、reload 后无 JS 错误、插件页显示组件运行中；0.2.2 新增的插件富文本详情可正常渲染 README。复制 Session ID 已改由 Harness 原生能力提供，插件不再注册 `conversation.session.header.actions` 按钮。
+- 设置入口：0.2.2 插件管理页按 `plugins.bundle.config` 槽渲染插件包配置区；插件已在 `dsh-agent-message` 注册表单（插件详情页可见），配置值仍由 Harness settings 文档持有（`Config` 的 `.volatile()` 字段原地生效）。
+- 清理：移除 0.2.1/0.2.2 聊天 DOM 中均不存在的 `[data-disclosure-row]` 自动展开路径；移除 Harness 已不读取的 `dshx.contributes` 清单字段。

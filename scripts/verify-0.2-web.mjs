@@ -10,7 +10,7 @@
  *   - the served HTML registers the plugin client half, and fetching that URL
  *     returns 200 with the bundle that names itself `dsh-agent-message-client`
  *
- * Note on 0.2.1 URL shape: the web app serves client halves through a bundled
+ * Note on the 0.2.x URL shape: the web app serves client halves through a bundled
  * `plugins/??<pkg>/client.js&rev=<hash>` URL listed in the HTML module manifest;
  * the plain `plugins/<pkg>/client.js` path answers 404. The printed web URL also
  * carries a one-shot `?token=` that must be exchanged for the `dsh-auth` cookie
@@ -270,7 +270,7 @@ async function main() {
     // The printed URL carries a one-shot ?token=; the server answers it with a
     // redirect plus a dsh-auth cookie. Node's fetch has no cookie jar, so follow
     // that handshake by hand, then read the browser-facing module list from the
-    // served HTML (0.2.1 serves client halves as `plugins/??<pkg>/client.js&rev=`).
+    // served HTML (0.2.x serves client halves as `plugins/??<pkg>/client.js&rev=`).
     const tokenUrl = new URL(url)
     const authResponse = await fetch(tokenUrl, { redirect: 'manual' }).catch((error) => ({ status: 0, headers: new Headers(), text: async () => String(error) }))
     const cookie = (authResponse.headers.getSetCookie?.() ?? []).map((value) => value.split(';')[0]).join('; ')
@@ -309,7 +309,7 @@ async function main() {
       `HTTP status: ${clientStatus}`,
       `body bytes: ${clientBody.length}`,
       `body contains "${CLIENT_MARKER}": ${clientBody.includes(CLIENT_MARKER)}`,
-      `plain ${CLIENT_PATH} status (0.2.1 serves the bundled ?? URL): ${directStatus}`,
+      `plain ${CLIENT_PATH} status (0.2.x serves the bundled ?? URL): ${directStatus}`,
       'auth: dsh-auth cookie obtained from the printed ?token= URL',
     ], { clientUrl, directUrl, clientStatus, directStatus, marker: CLIENT_MARKER, bodyHead: clientBody.slice(0, 400) })
     process.stdout.write(`  --- startup output (tail) ---\n${output.value.slice(-1200).split('\n').map((line) => `  | ${line}`).join('\n')}\n`)

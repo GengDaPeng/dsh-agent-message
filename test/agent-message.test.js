@@ -122,7 +122,7 @@ test('Host Config 的 volatile 字段只收窄投递细节，始终保留 messag
   assert.match(detailed.content[0].text, /messageId: /)
   assert.match(detailed.content[0].text, /"mode":"followup"/)
 
-  // 0.2.1 的 Loader 通过 updateVolatile 原地更新 apply 收到的 config 引用。
+  // 0.2.x 的 Loader 通过 updateVolatile 原地更新 apply 收到的 config 引用（0.2.2-rc.1 复核仍成立）。
   config.showTechnicalDetails = false
   const compact = send.presentResult(args, { content: send.output.render(args, result), isError: false, meta: result })
   assert.match(compact.content[0].text, /messageId: /)

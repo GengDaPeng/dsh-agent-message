@@ -29,7 +29,7 @@
  * that name from the home credential store's `refs:` section into the child
  * environment without printing the secret.
  *
- * CLI shape verified against 0.2.1-rc.2 before writing this script:
+ * CLI shape verified against 0.2.1-rc.2 and re-checked on 0.2.2-rc.1:
  *   - `dsh headless "<task>"` means profile name `headless`: the launcher
  *     rewrites a leading positional argument into `--profile`, and the app is
  *     selected by the profile's bundle list (`[--profile] <name> [app-args...]`).

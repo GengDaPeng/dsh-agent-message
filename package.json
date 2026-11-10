@@ -35,26 +35,20 @@
       ]
     }
   },
-  "dshx": {
-    "contributes": {
-      "tools": ["list_peer_agents", "send_agent_message", "check_delivery"],
-      "skills": []
-    }
-  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.2 <0.3.0",
-    "@deepseek-ai/schemastery": ">=3.18.5 <4.0.0"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/schemastery": ">=3.19.0 <4.0.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0"
   },
   "engines": {
     "node": ">=24 <25",
-    "dsh": ">=0.2.1-rc.2 <0.3.0"
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
   },
   "license": "MIT"
 }
