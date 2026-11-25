@@ -182,20 +182,38 @@ test('默认 followup 允许 idle 会话并进入独立下一 turn', async () =>
   assert.equal(target.inbox.nextStep.length, 0)
 })
 
-test('默认 followup 允许 running 会话并保持独立 next-turn', async () => {
+test('显式 followup 允许 running 会话并保持独立 next-turn', async () => {
   const sender = liveAgent('session-sender')
   const target = liveAgent('session-running')
   target.status = 'running'
   const { tools } = setup({ agents: [sender, target] })
 
   const result = await tools.get('send_agent_message').execute(
-    { to: 'session-running', content: '排队任务' },
+    { to: 'session-running', content: '排队任务', mode: 'followup' },
     { agent: sender },
   )
 
   assert.equal(result.mode, 'followup')
   assert.equal(target.inbox.nextTurn.length, 1)
   assert.equal(target.inbox.nextStep.length, 0)
+})
+
+test('默认 auto 对 running 目标走 steer、对空闲目标走 followup', async () => {
+  const sender = liveAgent('session-sender')
+  const running = liveAgent('session-running')
+  running.status = 'running'
+  const idle = liveAgent('session-idle')
+  const { tools } = setup({ agents: [sender, running, idle] })
+  const send = tools.get('send_agent_message')
+
+  const live = await send.execute({ to: 'session-running', content: '实时介入' }, { agent: sender })
+  assert.equal(live.mode, 'steer')
+  assert.equal(running.inbox.nextStep.length, 1)
+  assert.equal(running.inbox.nextTurn.length, 0)
+
+  const queued = await send.execute({ to: 'session-idle', content: '排队任务' }, { agent: sender })
+  assert.equal(queued.mode, 'followup')
+  assert.equal(idle.inbox.nextTurn.length, 1)
 })
 
 test('同一对会话双向合计 60 秒最多投递 10 条消息', async () => {
@@ -236,7 +254,7 @@ test('发送工具不再暴露 leave/wake 模式', async () => {
   const { tools } = setup({ agents: [sender, target] })
   const send = tools.get('send_agent_message')
 
-  assert.deepEqual(send.parameters.properties.mode.enum, ['followup', 'inject', 'steer'])
+  assert.deepEqual(send.parameters.properties.mode.enum, ['auto', 'followup', 'inject', 'steer'])
   await assert.rejects(send.execute(
     { to: 'target', content: '稍后处理', mode: 'leave' },
     { agent: sender },
